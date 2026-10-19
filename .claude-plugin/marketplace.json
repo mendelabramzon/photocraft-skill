@@ -1,0 +1,15 @@
+{
+  "name": "photocraft-skills",
+  "owner": {
+    "name": "Ivan",
+    "url": "https://github.com/mendelabramzon"
+  },
+  "description": "Unofficial Claude Code plugin for the PhotoCraft photo editor",
+  "plugins": [
+    {
+      "name": "photocraft",
+      "source": "./",
+      "description": "Operate PhotoCraft on macOS: live app control, headless batch editing, natural skin retouching"
+    }
+  ]
+}

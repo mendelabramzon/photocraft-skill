@@ -1,0 +1,13 @@
+{
+  "name": "photocraft",
+  "version": "1.0.0",
+  "description": "Unofficial: lets Claude operate PhotoCraft, the open-source Photoshop-style photo editor, on macOS. Live app control, headless batch editing, and natural, professional skin retouching.",
+  "author": {
+    "name": "Ivan",
+    "url": "https://github.com/mendelabramzon"
+  },
+  "homepage": "https://github.com/mendelabramzon/photocraft-skill",
+  "repository": "https://github.com/mendelabramzon/photocraft-skill",
+  "license": "Apache-2.0",
+  "keywords": ["photocraft", "photo-editing", "image-editing", "retouching", "psd", "macos"]
+}

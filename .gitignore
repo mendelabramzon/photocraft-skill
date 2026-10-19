@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.DS_Store
+# local test bench (sample photos, eval runs) and evals with machine-specific paths
+photocraft-workspace/
+skills/photocraft/evals/
