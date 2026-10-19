@@ -68,6 +68,18 @@ Everything the plugin runs or contacts, in full:
 - **Writes:** `~/.photocraft-skill/` (control token, launch state, working files) and the edited
   images you ask for.
 
+## Notes for reviewers
+
+- **The control token is not a user credential.** PhotoCraft creates a fresh random token each time
+  `pc.py launch` starts it (`--control-token-file ~/.photocraft-skill/token`, folder mode 0700). `pc.py`
+  reads that file only to authenticate its own connection to the app's control channel on
+  `127.0.0.1`, and sends it nowhere else. There is no secret for the user to provide, so a `userConfig`
+  option doesn't apply.
+- **Executables.** The plugin runs only two programs: the PhotoCraft app the user installed in
+  `/Applications`, and `photocraft-cli`, which the user installs themselves from PhotoCraft's official
+  GitHub release. Both are signed with the PhotoCraft developer's Developer ID. The plugin contains no
+  binaries, downloads nothing, installs nothing, and needs no network access beyond `127.0.0.1`.
+
 ## Layout
 
 ```

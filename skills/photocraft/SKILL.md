@@ -1,6 +1,8 @@
 ---
 name: photocraft
 description: Operate PhotoCraft, the open-source Photoshop-style image editor (storytold/photocraft), on the user's Mac. Drives the live desktop app (open files, add layers, adjustment layers, filters, type, shapes, selections, masks, layer styles, brush strokes, dialogs, screenshots) through its JSON control channel, and does headless file-in/file-out editing, batch processing and format conversion (PSD, PNG, JPEG, TIFF, WebP…) with photocraft-cli. Use this whenever the user mentions PhotoCraft, or asks to edit, retouch, color-grade, resize, crop, caption, composite, batch-process or convert images and PhotoCraft is how they edit images — even if they just say "the app", "my photo editor", or "do it in Photoshop-like steps".
+license: Apache-2.0
+compatibility: Needs macOS with the PhotoCraft desktop app, and Claude Code running on that Mac (it drives the app over 127.0.0.1). Headless editing and skin retouching also need photocraft-cli, installed by the user.
 ---
 
 # PhotoCraft
@@ -36,11 +38,12 @@ This reports the app path and version, whether `photocraft-cli` is installed, ev
 PhotoCraft process (and whether it has the control channel), and whether the channel answers.
 
 - **CLI missing and you need headless** (batch work, conversions, and the crops the skin-retouch
-  planners read): `$PC cli-info` names the `photocraft-cli` zip that matches the installed app, its
-  release page, and where the binary goes. Ask the user to install it: download that zip, check its
-  SHA-256 against the release's `SHA256SUMS.txt`, unzip it, and put `photocraft-cli` in
-  `~/.photocraft-skill/bin/` or on their PATH. Then `$PC status` shows it. The skill never downloads
-  binaries on its own; if the user asks you to do those steps for them, go ahead.
+  planners read): `$PC cli-info` names the `photocraft-cli` zip that matches the installed app and
+  where the binary goes. It's on that version's release page,
+  `https://github.com/storytold/photocraft/releases/tag/v<appVersion>`. Ask the user to install it:
+  download that zip, check its SHA-256 against the release's `SHA256SUMS.txt`, unzip it, and put
+  `photocraft-cli` in `~/.photocraft-skill/bin/` or on their PATH. Then `$PC status` shows it. The
+  skill never downloads binaries on its own; if the user asks you to do those steps for them, go ahead.
 - **App not found:** it's at https://github.com/storytold/photocraft/releases (macOS `.dmg`).
 
 ## Step 2 (live): get a controllable window

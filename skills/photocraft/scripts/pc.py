@@ -5,7 +5,7 @@ and find the headless `photocraft-cli` (`cli-info` says which release to get).
 Standard library only, and no internet access: it talks to 127.0.0.1 only.
 Run `pc.py -h` or `pc.py <subcommand> -h` for usage.
 
-State lives in ~/.photocraft-skill/ (override with PHOTOCRAFT_SKILL_HOME):
+State lives in ~/.photocraft-skill/:
   token       control-channel bearer token (mode 0600, created by the app at `launch`)
   state.json  port / pid / automation roots of the instance this script launched
   bin/        where the user puts photocraft-cli (or anywhere on PATH)
@@ -24,12 +24,11 @@ import sys
 import time
 from pathlib import Path
 
-HOME = Path(os.environ.get("PHOTOCRAFT_SKILL_HOME", Path.home() / ".photocraft-skill"))
+HOME = Path.home() / ".photocraft-skill"
 TOKEN_FILE = HOME / "token"
 STATE_FILE = HOME / "state.json"
 BIN_DIR = HOME / "bin"
 DEFAULT_PORT = 7878
-REPO = "storytold/photocraft"
 APP_CANDIDATES = [Path("/Applications/PhotoCraft.app"), Path.home() / "Applications/PhotoCraft.app"]
 
 
@@ -41,9 +40,6 @@ def die(msg, code=1):
 # ---------------------------------------------------------------- app discovery
 
 def find_app():
-    env = os.environ.get("PHOTOCRAFT_APP")
-    if env:
-        return Path(env)
     for p in APP_CANDIDATES:
         if p.exists():
             return p
@@ -91,7 +87,8 @@ def load_state():
 
 
 def read_token():
-    """The token the app wrote when `pc.py launch` started it; never a credential from the environment."""
+    """The per-launch session token PhotoCraft wrote when `pc.py launch` started it, used only to
+    authenticate this script's own connection to 127.0.0.1."""
     try:
         return TOKEN_FILE.read_text().strip()
     except FileNotFoundError:
@@ -102,7 +99,7 @@ class Control:
     """One authenticated JSON-lines connection to `PhotoCraft --control <port>`."""
 
     def __init__(self, port=None, timeout=65.0):
-        self.port = port or int(os.environ.get("PHOTOCRAFT_CONTROL_PORT", 0)) or load_state().get("port") or DEFAULT_PORT
+        self.port = port or load_state().get("port") or DEFAULT_PORT
         self.sock = socket.create_connection(("127.0.0.1", self.port), timeout=timeout)
         self.file = self.sock.makefile("rwb")
         self.next_id = 0
@@ -209,7 +206,7 @@ def cmd_status(args):
 def cmd_launch(args):
     app = find_app()
     if not app:
-        die("PhotoCraft.app not found (set PHOTOCRAFT_APP=/path/to/PhotoCraft.app)")
+        die("PhotoCraft.app not found in /Applications or ~/Applications, or by Spotlight")
     state = load_state()
     if state.get("port") and port_open(state["port"]):
         try:
@@ -370,9 +367,6 @@ def cmd_quit(args):
 # ---------------------------------------------------------------- headless CLI
 
 def find_cli():
-    env = os.environ.get("PHOTOCRAFT_CLI")
-    if env and Path(env).exists():
-        return Path(env)
     p = BIN_DIR / "photocraft-cli"
     if p.exists():
         return p
@@ -381,19 +375,16 @@ def find_cli():
 
 
 def cmd_cli_info(args):
-    """Which photocraft-cli to get: the release matching the installed app. Downloads nothing; the user
-    installs the binary themselves, then `status` finds it."""
+    """Which photocraft-cli the user should install: the one from the same PhotoCraft release as their app.
+    The user installs it; this only names it and where it goes, and `status` finds it afterwards."""
     version = args.version
     if not version:
         app = find_app()
         version = app_version(app) if app else None
-    page = f"https://github.com/{REPO}/releases/" + (f"tag/v{version}" if version else "latest")
     print(json.dumps({
         "installed": str(find_cli()) if find_cli() else None,
         "appVersion": version,
-        "releasePage": page,
-        "file": f"photocraft-cli-{version}-macos-universal.zip" if version else "photocraft-cli-<version>-macos-universal.zip",
-        "checksums": "SHA256SUMS.txt on the same release page",
+        "file": f"photocraft-cli-{version or '<version>'}-macos-universal.zip",
         "installTo": str(BIN_DIR / "photocraft-cli") + " (or any folder on PATH)",
     }, indent=1))
 
@@ -401,7 +392,7 @@ def cmd_cli_info(args):
 def cmd_cli(args):
     cli = find_cli()
     if not cli:
-        die("photocraft-cli not found; `pc.py cli-info` says which file to download and where it goes")
+        die("photocraft-cli not found; `pc.py cli-info` names the one to install and where it goes")
     os.execv(str(cli), [str(cli)] + args.rest)
 
 
@@ -455,7 +446,7 @@ def main():
     p.add_argument("--force", action="store_true")
     p.set_defaults(fn=cmd_quit)
 
-    p = sub.add_parser("cli-info", help="which photocraft-cli release to download for the installed app, and where it goes")
+    p = sub.add_parser("cli-info", help="which photocraft-cli matches the installed app, and where it goes")
     p.add_argument("--version", help="release version, e.g. 0.10.0 (default: the installed app's)")
     p.set_defaults(fn=cmd_cli_info)
 
