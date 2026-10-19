@@ -54,6 +54,17 @@ To update later: `claude plugin marketplace update photocraft-skills`, then
 - Edits are saved under new names (`photo-edited.jpg`, a layered `.psd`); originals are not overwritten.
 - Claude Code asks before running each script unless you allow it.
 
+Everything the plugin runs or contacts, in full:
+
+- **Runs locally:** Python 3 scripts in `skills/photocraft/scripts/`, the PhotoCraft app and
+  `photocraft-cli` as local processes, and macOS `pgrep` / `mdfind` to find them.
+- **Network:** `127.0.0.1` only, for the PhotoCraft control channel. The one exception is
+  `pc.py install-cli`, which, when you need the CLI, reads `api.github.com` and downloads that
+  release's files from GitHub for `storytold/photocraft`. Nothing else, and no telemetry: your photos
+  never leave your Mac.
+- **Writes:** `~/.photocraft-skill/` (control token, launch state, the CLI, working files) and the
+  edited images you ask for.
+
 ## Layout
 
 ```
