@@ -30,6 +30,11 @@ Example requests:
 - macOS with PhotoCraft installed ([releases](https://github.com/storytold/photocraft/releases))
 - Python 3 (the scripts use only the standard library)
 - [Claude Code](https://code.claude.com)
+- For headless editing and skin retouching: `photocraft-cli`, from the same PhotoCraft release as your
+  app. On that release's page, download `photocraft-cli-<version>-macos-universal.zip`, compare its
+  SHA-256 with `SHA256SUMS.txt` there, unzip it, and put `photocraft-cli` in `~/.photocraft-skill/bin/`
+  or anywhere on your PATH. Ask Claude "which PhotoCraft CLI do I need?" and it will name the exact
+  file. It's signed by PhotoCraft's developer.
 
 ## Install
 
@@ -49,8 +54,8 @@ To update later: `claude plugin marketplace update photocraft-skills`, then
 - `pc.py launch` starts a **separate** PhotoCraft window with its control channel on: localhost only,
   a fresh token in `~/.photocraft-skill/token` (mode 0600), and file access limited to your home
   folder by default. A PhotoCraft window you opened yourself is never driven, closed or quit.
-- `pc.py install-cli` downloads the `photocraft-cli` that matches your installed app from PhotoCraft's
-  GitHub releases and checks it against the release's SHA-256 sums.
+- The plugin never downloads anything. Headless editing (and the skin-retouch planners) need
+  `photocraft-cli`, which you install yourself once; see Requirements.
 - Edits are saved under new names (`photo-edited.jpg`, a layered `.psd`); originals are not overwritten.
 - Claude Code asks before running each script unless you allow it.
 
@@ -58,12 +63,10 @@ Everything the plugin runs or contacts, in full:
 
 - **Runs locally:** Python 3 scripts in `skills/photocraft/scripts/`, the PhotoCraft app and
   `photocraft-cli` as local processes, and macOS `pgrep` / `mdfind` to find them.
-- **Network:** `127.0.0.1` only, for the PhotoCraft control channel. The one exception is
-  `pc.py install-cli`, which, when you need the CLI, reads `api.github.com` and downloads that
-  release's files from GitHub for `storytold/photocraft`. Nothing else, and no telemetry: your photos
-  never leave your Mac.
-- **Writes:** `~/.photocraft-skill/` (control token, launch state, the CLI, working files) and the
-  edited images you ask for.
+- **Network:** `127.0.0.1` only, for the PhotoCraft control channel. Nothing else, no downloads and
+  no telemetry: your photos never leave your Mac.
+- **Writes:** `~/.photocraft-skill/` (control token, launch state, working files) and the edited
+  images you ask for.
 
 ## Layout
 

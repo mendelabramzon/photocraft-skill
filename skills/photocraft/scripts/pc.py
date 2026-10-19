@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """PhotoCraft helper: drive the live desktop app over its JSON control channel,
-and find/install the headless `photocraft-cli` that matches the installed app.
+and find the headless `photocraft-cli` (`cli-info` says which release to get).
 
-Standard library only. Run `pc.py -h` or `pc.py <subcommand> -h` for usage.
+Standard library only, and no internet access: it talks to 127.0.0.1 only.
+Run `pc.py -h` or `pc.py <subcommand> -h` for usage.
 
 State lives in ~/.photocraft-skill/ (override with PHOTOCRAFT_SKILL_HOME):
-  token       control-channel bearer token (mode 0600, created by the app)
+  token       control-channel bearer token (mode 0600, created by the app at `launch`)
   state.json  port / pid / automation roots of the instance this script launched
-  bin/        photocraft-cli installed by `install-cli`
+  bin/        where the user puts photocraft-cli (or anywhere on PATH)
   app.log     stdout/stderr of the launched app
 """
 
 import argparse
 import base64
-import hashlib
 import json
 import os
 import plistlib
@@ -21,10 +21,7 @@ import shutil
 import socket
 import subprocess
 import sys
-import tempfile
 import time
-import urllib.request
-import zipfile
 from pathlib import Path
 
 HOME = Path(os.environ.get("PHOTOCRAFT_SKILL_HOME", Path.home() / ".photocraft-skill"))
@@ -94,14 +91,11 @@ def load_state():
 
 
 def read_token():
-    env = os.environ.get("PHOTOCRAFT_CONTROL_TOKEN")
-    if env:
-        return env.strip()
-    path = Path(os.environ.get("PHOTOCRAFT_CONTROL_TOKEN_FILE", TOKEN_FILE))
+    """The token the app wrote when `pc.py launch` started it; never a credential from the environment."""
     try:
-        return path.read_text().strip()
+        return TOKEN_FILE.read_text().strip()
     except FileNotFoundError:
-        die(f"no control token at {path}; start the app with `pc.py launch` first")
+        die(f"no control token at {TOKEN_FILE}; start the app with `pc.py launch` first")
 
 
 class Control:
@@ -386,43 +380,28 @@ def find_cli():
     return Path(w) if w else None
 
 
-def cmd_install_cli(args):
+def cmd_cli_info(args):
+    """Which photocraft-cli to get: the release matching the installed app. Downloads nothing; the user
+    installs the binary themselves, then `status` finds it."""
     version = args.version
     if not version:
         app = find_app()
         version = app_version(app) if app else None
-    tag = f"v{version}" if version else None
-    api = f"https://api.github.com/repos/{REPO}/releases/" + (f"tags/{tag}" if tag else "latest")
-    req = urllib.request.Request(api, headers={"User-Agent": "photocraft-skill", "Accept": "application/vnd.github+json"})
-    rel = json.load(urllib.request.urlopen(req, timeout=30))
-    assets = {a["name"]: a["browser_download_url"] for a in rel["assets"]}
-    name = next((n for n in assets if n.startswith("photocraft-cli-") and n.endswith("-macos-universal.zip")), None)
-    if not name:
-        die(f"release {rel['tag_name']} has no macOS photocraft-cli asset")
-    sums = urllib.request.urlopen(urllib.request.Request(assets["SHA256SUMS.txt"], headers={"User-Agent": "photocraft-skill"}), timeout=30).read().decode()
-    expected = next((l.split()[0] for l in sums.splitlines() if l.strip().endswith(name)), None)
-    with tempfile.TemporaryDirectory() as td:
-        zpath = Path(td) / name
-        with urllib.request.urlopen(urllib.request.Request(assets[name], headers={"User-Agent": "photocraft-skill"}), timeout=300) as r:
-            zpath.write_bytes(r.read())
-        digest = hashlib.sha256(zpath.read_bytes()).hexdigest()
-        if expected and digest != expected:
-            die(f"checksum mismatch for {name}: {digest} != {expected}")
-        with zipfile.ZipFile(zpath) as z:
-            member = next(m for m in z.namelist() if m.endswith("/photocraft-cli") or m == "photocraft-cli")
-            BIN_DIR.mkdir(parents=True, exist_ok=True)
-            target = BIN_DIR / "photocraft-cli"
-            with z.open(member) as src, open(target, "wb") as dst:
-                shutil.copyfileobj(src, dst)
-            target.chmod(0o755)
-    ver = subprocess.run([str(target), "--version"], capture_output=True, text=True).stdout.strip()
-    print(json.dumps({"installed": str(target), "release": rel["tag_name"], "sha256": digest, "version": ver}))
+    page = f"https://github.com/{REPO}/releases/" + (f"tag/v{version}" if version else "latest")
+    print(json.dumps({
+        "installed": str(find_cli()) if find_cli() else None,
+        "appVersion": version,
+        "releasePage": page,
+        "file": f"photocraft-cli-{version}-macos-universal.zip" if version else "photocraft-cli-<version>-macos-universal.zip",
+        "checksums": "SHA256SUMS.txt on the same release page",
+        "installTo": str(BIN_DIR / "photocraft-cli") + " (or any folder on PATH)",
+    }, indent=1))
 
 
 def cmd_cli(args):
     cli = find_cli()
     if not cli:
-        die("photocraft-cli not installed; run `pc.py install-cli`")
+        die("photocraft-cli not found; `pc.py cli-info` says which file to download and where it goes")
     os.execv(str(cli), [str(cli)] + args.rest)
 
 
@@ -476,9 +455,9 @@ def main():
     p.add_argument("--force", action="store_true")
     p.set_defaults(fn=cmd_quit)
 
-    p = sub.add_parser("install-cli", help="download photocraft-cli matching the installed app (checksum verified)")
+    p = sub.add_parser("cli-info", help="which photocraft-cli release to download for the installed app, and where it goes")
     p.add_argument("--version", help="release version, e.g. 0.10.0 (default: the installed app's)")
-    p.set_defaults(fn=cmd_install_cli)
+    p.set_defaults(fn=cmd_cli_info)
 
     p = sub.add_parser("cli", help="run photocraft-cli with the remaining arguments")
     p.add_argument("rest", nargs=argparse.REMAINDER)

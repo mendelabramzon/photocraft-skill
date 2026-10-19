@@ -22,7 +22,7 @@ standard library only). Set a variable for it in your shell commands,
 |---|---|---|
 | Use when | The user wants it done *in PhotoCraft*: to watch, keep working on the result, see dialogs, use tools on the canvas | File in → file out: "make these 40 photos web-sized", convert formats, generate an image, scripted edits |
 | Speed | One round trip per request | ~0.2 s for a whole edit chain |
-| Start | `$PC launch [files…]` | `$PC install-cli` once, then `$PC cli …` |
+| Start | `$PC launch [files…]` | the user installs it once (`$PC cli-info`), then `$PC cli …` |
 | Details | `references/live-app.md` | `references/headless.md` |
 
 If unclear, ask yourself whether the user expects to see the result open in the app afterwards.
@@ -35,9 +35,12 @@ If yes, live; otherwise headless is faster and can't disturb their open work.
 This reports the app path and version, whether `photocraft-cli` is installed, every running
 PhotoCraft process (and whether it has the control channel), and whether the channel answers.
 
-- **CLI missing and you need headless:** `$PC install-cli` downloads the `photocraft-cli` release
-  that matches the installed app's version from GitHub, verifies its SHA-256 against the release's
-  `SHA256SUMS.txt`, and puts it in `~/.photocraft-skill/bin/`. Tell the user you're doing it.
+- **CLI missing and you need headless** (batch work, conversions, and the crops the skin-retouch
+  planners read): `$PC cli-info` names the `photocraft-cli` zip that matches the installed app, its
+  release page, and where the binary goes. Ask the user to install it: download that zip, check its
+  SHA-256 against the release's `SHA256SUMS.txt`, unzip it, and put `photocraft-cli` in
+  `~/.photocraft-skill/bin/` or on their PATH. Then `$PC status` shows it. The skill never downloads
+  binaries on its own; if the user asks you to do those steps for them, go ahead.
 - **App not found:** it's at https://github.com/storytold/photocraft/releases (macOS `.dmg`).
 
 ## Step 2 (live): get a controllable window

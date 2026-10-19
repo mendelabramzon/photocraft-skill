@@ -2,7 +2,7 @@
 
 Read this for file-in, file-out work that doesn't need the window: batch jobs, conversions,
 scripted edits, generating images. Everything runs through `pc.py cli …`, which forwards to
-the `photocraft-cli` binary (install it with `pc.py install-cli`).
+the `photocraft-cli` binary (the user installs it once; `pc.py cli-info` says which file and where).
 
 Paths given to the CLI are ordinary paths; there are no automation roots in `run`, `batch`,
 `convert` or `info`.
