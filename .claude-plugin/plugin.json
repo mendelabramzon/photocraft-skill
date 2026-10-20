@@ -1,8 +1,8 @@
 {
   "name": "photocraft",
   "displayName": "PhotoCraft Assistant (unofficial)",
-  "version": "1.2.0",
-  "description": "Unofficial: lets Claude operate PhotoCraft, the open-source Photoshop-style photo editor, on macOS. Live app control, headless batch editing, and professional retouching workflows: skin, eyes and teeth, colour grading, cutouts and product photos, object and wire removal, straightening, skies and photo restoration.",
+  "version": "1.3.0",
+  "description": "Unofficial: lets Claude operate PhotoCraft, the open-source Photoshop-style photo editor: the live app on macOS, or headless in Claude app chats (web, desktop, iPhone, iPad) and on Linux. Batch editing and professional retouching workflows: skin, eyes and teeth, colour grading, cutouts and product photos, object and wire removal, straightening, skies and photo restoration.",
   "author": {
     "name": "Ivan",
     "url": "https://github.com/mendelabramzon"
@@ -10,5 +10,5 @@
   "homepage": "https://github.com/mendelabramzon/photocraft-skill",
   "repository": "https://github.com/mendelabramzon/photocraft-skill",
   "license": "Apache-2.0",
-  "keywords": ["photocraft", "photo-editing", "image-editing", "retouching", "color-grading", "background-removal", "photo-restoration", "psd", "macos"]
+  "keywords": ["photocraft", "photo-editing", "image-editing", "retouching", "color-grading", "background-removal", "photo-restoration", "psd", "macos", "linux"]
 }

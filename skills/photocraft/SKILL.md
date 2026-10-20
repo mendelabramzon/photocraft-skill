@@ -1,8 +1,8 @@
 ---
 name: photocraft
-description: Operate PhotoCraft, the open-source Photoshop-style image editor (storytold/photocraft), on the user's Mac. Drives the live desktop app (open files, add layers, adjustment layers, filters, type, shapes, selections, masks, layer styles, brush strokes, dialogs, screenshots) through its JSON control channel, and does headless file-in/file-out editing, batch processing and format conversion (PSD, PNG, JPEG, TIFF, WebP…) with photocraft-cli. Includes professional retouching workflows: skin, eyes and teeth, colour correction and grading, cutouts and product photos on white, removing objects, wires and dust, straightening horizons and verticals, sky replacement, old-photo restoration. Use this whenever the user mentions PhotoCraft, or asks to edit, retouch, color-grade, resize, crop, caption, composite, batch-process or convert images and PhotoCraft is how they edit images — even if they just say "the app", "my photo editor", or "do it in Photoshop-like steps".
+description: "Operate PhotoCraft, the open-source Photoshop-style image editor (storytold/photocraft): the live app on the user's Mac, or headless on Linux and in Claude's sandbox (Claude app chats, Managed Agents). Drives the app (layers, adjustment layers, filters, type, selections, masks, layer styles, brushes, dialogs) over its control channel, and does headless file-in/file-out editing, batch processing and conversion (PSD, PNG, JPEG, TIFF, WebP) with photocraft-cli. Includes professional retouching workflows: skin, eyes and teeth, colour correction and grading, cutouts and product photos on white, removing objects, wires and dust, straightening, sky replacement, old-photo restoration. Use this whenever the user mentions PhotoCraft, or asks to edit, retouch, color-grade, resize, crop, caption, composite, batch-process or convert images and PhotoCraft is how they edit images, including a photo attached to a chat — even if they just say 'the app', 'my photo editor', or 'do it in Photoshop-like steps'."
 license: Apache-2.0
-compatibility: Needs macOS with the PhotoCraft desktop app, and Claude Code running on that Mac (it drives the app over 127.0.0.1). Headless editing and the retouching workflows' planning scripts also need photocraft-cli, installed by the user.
+compatibility: Live app - macOS with the PhotoCraft desktop app and Claude Code on that Mac (driven over 127.0.0.1). Headless - also Linux, including Claude's cloud sandbox in the Claude apps and in Managed Agents. Headless editing and the workflows' planning scripts need photocraft-cli - installed by the user on a Mac, by scripts/install_cli.py on Linux (x86_64 or aarch64, glibc 2.35 or newer).
 ---
 
 # PhotoCraft
@@ -24,11 +24,15 @@ standard library only). Set a variable for it in your shell commands,
 |---|---|---|
 | Use when | The user wants it done *in PhotoCraft*: to watch, keep working on the result, see dialogs, use tools on the canvas | File in → file out: "make these 40 photos web-sized", convert formats, generate an image, scripted edits |
 | Speed | One round trip per request | ~0.2 s for a whole edit chain |
-| Start | `$PC launch [files…]` | the user installs it once (`$PC cli-info`), then `$PC cli …` |
+| Start | `$PC launch [files…]` | installed once (`$PC cli-info` says how), then `$PC cli …` |
 | Details | `references/live-app.md` | `references/headless.md` |
 
 If unclear, ask yourself whether the user expects to see the result open in the app afterwards.
 If yes, live; otherwise headless is faster and can't disturb their open work.
+
+**No desktop app** (a Linux server, a chat in the Claude apps, a Managed Agents session): everything is
+headless, and `$PC launch`, `screenshot` and `export` don't work. Read `references/no-app.md` first: it
+covers installing the CLI, where the user's photo is and where results go, and how to look at your work.
 
 ## Step 1: check what's there
 
@@ -43,8 +47,12 @@ PhotoCraft process (and whether it has the control channel), and whether the cha
   `https://github.com/storytold/photocraft/releases/tag/v<appVersion>`. Ask the user to install it:
   download that zip, check its SHA-256 against the release's `SHA256SUMS.txt`, unzip it, and put
   `photocraft-cli` in `~/.photocraft-skill/bin/` or on their PATH. Then `$PC status` shows it. The
-  skill never downloads binaries on its own; if the user asks you to do those steps for them, go ahead.
+  skill never downloads binaries on its own on a Mac; if the user asks you to do those steps for them, go ahead.
 - **App not found:** it's at https://github.com/storytold/photocraft/releases (macOS `.dmg`).
+- **Linux** (`platform` is `linux`): there is no app to find. If `cli` is null, run
+  `python3 ${CLAUDE_SKILL_DIR}/scripts/install_cli.py`, which downloads PhotoCraft's own Linux release and
+  checks its SHA-256. In a Claude sandbox, `sandbox` names the uploads and outputs folders. Then follow
+  `references/no-app.md`.
 
 ## Step 2 (live): get a controllable window
 
@@ -86,7 +94,8 @@ user's home folder; override with `--read-root` / `--write-root`).
    the script, so any folder works) or `$PC export <path>.png` (just the image, flattened; written
    by the app, so the path must be inside the write root — the home folder by default, not `/tmp`).
    Headless: the `--out` file.
-   Then read the PNG with the Read tool. Shrink large ones first (`sips -Z 1600 in.png --out small.png`)
+   Then read the PNG with the Read tool. Shrink large ones first (`sips -Z 1600 in.png --out small.png`,
+   or anywhere `$PC cli run in.png --cmd image.imageSize --params '{"width":1600}' --out small.png`)
    so they fit in context.
 
 ### The mistake to avoid: wrong active layer
@@ -371,6 +380,9 @@ make a new document and leave the original untouched.
 - `references/live-app.md`: every control-channel method, pointer/keys/tools, dialogs,
   automation roots, jobs, troubleshooting. Read before using pointer input or dialogs.
 - `references/headless.md`: `run`, `batch`, `serve`, `convert`, `info`, and the optional MCP server.
+- `references/no-app.md`: working without the desktop app (Linux servers, Claude app chats, Managed
+  Agents): `install_cli.py`, where files come from and go, the headless form of each live step, looking
+  at your work, the 30 MB download limit in chats.
 - `references/skin-retouch.md`: the professional skin-retouch workflow, parameters, false hits.
 - `references/feature-swap.md`: opening closed eyes (or swapping a smile or head) from another frame:
   donor, alignment, tone, mask, checks, and the feedback each mistake drew. Script: `feature_swap.py`

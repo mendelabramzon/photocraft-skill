@@ -1,9 +1,10 @@
 # PhotoCraft for Claude Code (unofficial)
 
 A Claude Code plugin that lets Claude operate [PhotoCraft](https://github.com/storytold/photocraft),
-the open-source, Photoshop-style photo editor, on your Mac. Ask for an edit in plain words; Claude runs
-PhotoCraft's own commands (the same ones its menus and tools use), looks at the result, and keeps your
-originals untouched.
+the open-source, Photoshop-style photo editor: in the app on your Mac, or headless in a chat in the Claude
+apps (web, desktop, iPhone, iPad) and on Linux. Ask for an edit in plain words; Claude runs PhotoCraft's
+own commands (the same ones its menus and tools use), looks at the result, and keeps your originals
+untouched.
 
 > Community project, not affiliated with or endorsed by the PhotoCraft authors.
 
@@ -53,6 +54,8 @@ Example requests:
 
 ## Requirements
 
+On a Mac, to watch the edits in the app:
+
 - macOS with PhotoCraft installed ([releases](https://github.com/storytold/photocraft/releases))
 - Python 3 (the scripts use only the standard library)
 - [Claude Code](https://code.claude.com)
@@ -62,7 +65,15 @@ Example requests:
   or anywhere on your PATH. Ask Claude "which PhotoCraft CLI do I need?" and it will name the exact
   file. It's signed by PhotoCraft's developer.
 
+In the Claude apps (web, desktop, iPhone, iPad): a paid Claude plan with code execution on (Settings >
+Capabilities). Nothing to install on your device; Claude sets up `photocraft-cli` in its sandbox.
+
+On a Linux server: Python 3, Claude Code, and x86_64 or aarch64 with glibc 2.35 or newer (Ubuntu 22.04+,
+Debian 12+). Claude installs `photocraft-cli` with `install_cli.py`.
+
 ## Install
+
+In Claude Code:
 
 ```
 claude plugin marketplace add mendelabramzon/photocraft-skill
@@ -75,13 +86,22 @@ you ask for a photo edit; you can also call it as `/photocraft:photocraft`.
 To update later: `claude plugin marketplace update photocraft-skills`, then
 `claude plugin update photocraft@photocraft-skills`.
 
+In the Claude apps, once, in claude.ai or the desktop app: **Customize > Plugins > Add > Add
+marketplace**, enter `mendelabramzon/photocraft-skill`, then **Add** on PhotoCraft. It's then in your
+chats on every device, and in Claude Code too. Attach a photo, ask for the edit, and download the
+result. Downloads from a chat are capped at 30 MB per file, so large layered files come as PhotoCraft's
+own `.pcraft`, which is smaller than a PSD.
+
 ## How it works, and what it touches
 
 - `pc.py launch` starts a **separate** PhotoCraft window with its control channel on: localhost only,
   a fresh token in `~/.photocraft-skill/token` (mode 0600), and file access limited to your home
   folder by default. A PhotoCraft window you opened yourself is never driven, closed or quit.
-- The plugin never downloads anything. Headless editing (and the retouching workflows' planners) need
-  `photocraft-cli`, which you install yourself once; see Requirements.
+- On a Mac the plugin never downloads anything. Headless editing (and the retouching workflows'
+  planners) need `photocraft-cli`, which you install yourself once; see Requirements.
+- On Linux, including Claude's sandbox in the Claude apps, there is no app and nothing for you to
+  install: `install_cli.py` downloads PhotoCraft's official Linux release (a pinned version) from its
+  GitHub release page, checks its SHA-256, and installs `photocraft-cli` from it.
 - Edits are saved under new names (`photo-edited.jpg`, a layered `.psd`); originals are not overwritten.
 - Claude Code asks before running each script unless you allow it.
 
@@ -90,10 +110,13 @@ Everything the plugin runs or contacts, in full:
 - **Runs locally:** Python 3 scripts in `skills/photocraft/scripts/`, the PhotoCraft app and
   `photocraft-cli` as local processes, macOS `pgrep` / `mdfind` to find them, and `mdls` to read
   photos' capture times when looking for a donor frame (feature swap).
-- **Network:** `127.0.0.1` only, for the PhotoCraft control channel. Nothing else, no downloads and
-  no telemetry: your photos never leave your Mac.
-- **Writes:** `~/.photocraft-skill/` (control token, launch state, working files) and the edited
-  images you ask for.
+- **Network:** on a Mac, `127.0.0.1` only, for the PhotoCraft control channel. Nothing else, no
+  downloads and no telemetry: your photos never leave your Mac. On Linux, one download besides:
+  `install_cli.py` fetches `photocraft-<version>-linux-<arch>.tar.gz` from
+  `github.com/storytold/photocraft/releases`. In the Claude apps your photo is edited in Claude's
+  sandbox, where Claude runs anyway.
+- **Writes:** `~/.photocraft-skill/` (control token, launch state, working files; on Linux also
+  `bin/photocraft-cli`) and the edited images you ask for.
 
 ## Notes for reviewers
 
@@ -105,7 +128,13 @@ Everything the plugin runs or contacts, in full:
 - **Executables.** The plugin runs only two programs: the PhotoCraft app the user installed in
   `/Applications`, and `photocraft-cli`, which the user installs themselves from PhotoCraft's official
   GitHub release. Both are signed with the PhotoCraft developer's Developer ID. The plugin contains no
-  binaries, downloads nothing, installs nothing, and needs no network access beyond `127.0.0.1`.
+  binaries. On a Mac it downloads nothing, installs nothing, and needs no network access beyond
+  `127.0.0.1`.
+- **Linux.** There, `scripts/install_cli.py` is the only code that uses the network. It refuses to run on
+  macOS, downloads one file (PhotoCraft's official Linux release tarball for the pinned version and the
+  machine's architecture), refuses it unless its SHA-256 matches the value pinned in the script (copied
+  from that release's `SHA256SUMS.txt`), and extracts only `bin/photocraft-cli` into
+  `~/.photocraft-skill/bin/`. `pc.py` itself still talks to `127.0.0.1` only.
 
 ## Layout
 
@@ -113,8 +142,8 @@ Everything the plugin runs or contacts, in full:
 .claude-plugin/plugin.json        plugin manifest
 .claude-plugin/marketplace.json   this repo is also its own marketplace
 skills/photocraft/SKILL.md        the skill
-skills/photocraft/references/     command reference, live-app and headless guides, one guide per retouching workflow
-skills/photocraft/scripts/        pc.py (control channel + CLI helper), the workflow planners, import_layers.py
+skills/photocraft/references/     command reference, live-app, headless and no-app guides, one guide per retouching workflow
+skills/photocraft/scripts/        pc.py (control channel + CLI helper), install_cli.py (Linux), the workflow planners, import_layers.py
 ```
 
 ## License

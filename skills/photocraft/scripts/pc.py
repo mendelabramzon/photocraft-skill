@@ -3,13 +3,14 @@
 and find the headless `photocraft-cli` (`cli-info` says which release to get).
 `script --open/--save` and the Headless class run the same steps in a `photocraft-cli serve` session.
 
-Standard library only, and no internet access: it talks to 127.0.0.1 only.
+Standard library only, and no internet access: it talks to 127.0.0.1 only. (On Linux, where there is
+no desktop app, install_cli.py next to it downloads photocraft-cli from PhotoCraft's release page.)
 Run `pc.py -h` or `pc.py <subcommand> -h` for usage.
 
 State lives in ~/.photocraft-skill/:
   token       control-channel bearer token (mode 0600, created by the app at `launch`)
   state.json  port / pid / automation roots of the instance this script launched
-  bin/        where the user puts photocraft-cli (or anywhere on PATH)
+  bin/        photocraft-cli: put there by the user on a Mac, by install_cli.py on Linux (or anywhere on PATH)
   app.log     stdout/stderr of the launched app
 """
 
@@ -31,6 +32,9 @@ STATE_FILE = HOME / "state.json"
 BIN_DIR = HOME / "bin"
 DEFAULT_PORT = 7878
 APP_CANDIDATES = [Path("/Applications/PhotoCraft.app"), Path.home() / "Applications/PhotoCraft.app"]
+# Where a Claude sandbox puts the user's files and collects results: a chat in the Claude apps, a Managed Agents session.
+SANDBOX_DIRS = {"uploads": ("/mnt/user-data/uploads", "/mnt/session/uploads"),
+                "outputs": ("/mnt/user-data/outputs", "/mnt/session/outputs")}
 
 
 def die(msg, code=1):
@@ -69,8 +73,11 @@ def app_version(app):
 
 def running_instances():
     """PIDs and command lines of running PhotoCraft desktop processes."""
-    out = subprocess.run(["pgrep", "-fl", "PhotoCraft.app/Contents/MacOS/PhotoCraft"],
-                         capture_output=True, text=True).stdout
+    try:
+        out = subprocess.run(["pgrep", "-fl", "PhotoCraft.app/Contents/MacOS/PhotoCraft"],
+                             capture_output=True, text=True).stdout
+    except FileNotFoundError:  # no pgrep: a slim Linux image, which has no desktop app either
+        return []
     rows = []
     for line in out.strip().splitlines():
         pid, _, cmd = line.partition(" ")
@@ -218,6 +225,7 @@ def cmd_status(args):
     app = find_app()
     state = load_state()
     info = {
+        "platform": sys.platform,
         "app": str(app) if app else None,
         "appVersion": app_version(app) if app else None,
         "cli": str(find_cli()) if find_cli() else None,
@@ -225,6 +233,9 @@ def cmd_status(args):
         "launched": state or None,
         "controlReachable": False,
     }
+    sandbox = {k: next((d for d in dirs if os.path.isdir(d)), None) for k, dirs in SANDBOX_DIRS.items()}
+    if any(sandbox.values()):
+        info["sandbox"] = sandbox
     port = state.get("port") or DEFAULT_PORT
     if port_open(port) and TOKEN_FILE.exists():
         try:
@@ -243,6 +254,8 @@ def cmd_status(args):
 
 
 def cmd_launch(args):
+    if sys.platform != "darwin":
+        die("pc.py launch drives the macOS app; without it, work headless (references/no-app.md)")
     app = find_app()
     if not app:
         die("PhotoCraft.app not found in /Applications or ~/Applications, or by Spotlight")
@@ -433,6 +446,14 @@ def find_cli():
 def cmd_cli_info(args):
     """Which photocraft-cli the user should install: the one from the same PhotoCraft release as their app.
     The user installs it; this only names it and where it goes, and `status` finds it afterwards."""
+    if sys.platform.startswith("linux"):
+        print(json.dumps({
+            "installed": str(find_cli()) if find_cli() else None,
+            "install": f"python3 {Path(__file__).resolve().with_name('install_cli.py')}",
+            "what": "downloads PhotoCraft's official Linux release, checks its SHA-256, puts photocraft-cli in "
+                    + str(BIN_DIR),
+        }, indent=1))
+        return
     version = args.version
     if not version:
         app = find_app()
