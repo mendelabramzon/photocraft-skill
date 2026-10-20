@@ -19,10 +19,36 @@ originals untouched.
   post-acne marks with micro dodge & burn and a colour layer that fade tone and colour together.
   Pores, stubble, light and the person's features stay. Everything lands on named, editable layers.
 
+The other most-requested retouching jobs work the same way. Each has a guide with the rules
+professionals follow and planning scripts that measure what a retoucher would eyeball. The result is
+built as named, masked layers and checked against the plan's predicted pixels.
+
+- **Eyes and teeth.** Teeth less yellow but never whiter than the eye whites. Cleaner eye whites,
+  a little life in the iris, red-eye. Closed eyes opened with the eyes from another frame of the same
+  shoot.
+- **Colour by the numbers.** White balance from real neutrals, black and white points, tested looks,
+  matching one shot to another, and black & white. All as editable Curves layers.
+- **Cutouts and product photos on white.** Edges checked on white, black and colour, the product's
+  real shadow kept. Marketplace images (pure white, 85 % fill, sRGB) are checked automatically.
+- **Dust, wires and distractions.** Sensor dust and power lines are removed along the whole wire,
+  stopping at poles and branches. People and objects go with patch and clone, shadows and
+  reflections included.
+- **Straight horizons and verticals.** Measured from the photo's own lines and corrected with a camera
+  model from its EXIF, so buildings keep their proportions. Cropped with no empty corners.
+- **Skies.** A precise sky mask, a decision between enhancing and replacing, and a light-matched new
+  sky with no halo.
+- **Old-photo restoration.** Dust and scratches repaired through masks with the grain kept, faded
+  dyes and casts corrected, faces left as they are.
+
 Example requests:
 
 - "Open ~/Pictures/beach.jpg in PhotoCraft, make it warmer and punchier, keep it editable."
 - "Retouch his skin: clean, but very natural."
+- "Whiten her teeth a little and brighten the eyes. Nobody should notice."
+- "Put these product photos on pure white for Amazon, with a soft shadow."
+- "Remove the power lines from the sky."
+- "The building leans backwards. Straighten the verticals."
+- "Restore this scan of my grandparents' wedding photo."
 - "Make 256 px web thumbnails of every JPEG in this folder, as PNGs in thumbs/."
 
 ## Requirements
@@ -30,7 +56,7 @@ Example requests:
 - macOS with PhotoCraft installed ([releases](https://github.com/storytold/photocraft/releases))
 - Python 3 (the scripts use only the standard library)
 - [Claude Code](https://code.claude.com)
-- For headless editing and skin retouching: `photocraft-cli`, from the same PhotoCraft release as your
+- For headless editing and the retouching workflows: `photocraft-cli`, from the same PhotoCraft release as your
   app. On that release's page, download `photocraft-cli-<version>-macos-universal.zip`, compare its
   SHA-256 with `SHA256SUMS.txt` there, unzip it, and put `photocraft-cli` in `~/.photocraft-skill/bin/`
   or anywhere on your PATH. Ask Claude "which PhotoCraft CLI do I need?" and it will name the exact
@@ -54,7 +80,7 @@ To update later: `claude plugin marketplace update photocraft-skills`, then
 - `pc.py launch` starts a **separate** PhotoCraft window with its control channel on: localhost only,
   a fresh token in `~/.photocraft-skill/token` (mode 0600), and file access limited to your home
   folder by default. A PhotoCraft window you opened yourself is never driven, closed or quit.
-- The plugin never downloads anything. Headless editing (and the skin-retouch planners) need
+- The plugin never downloads anything. Headless editing (and the retouching workflows' planners) need
   `photocraft-cli`, which you install yourself once; see Requirements.
 - Edits are saved under new names (`photo-edited.jpg`, a layered `.psd`); originals are not overwritten.
 - Claude Code asks before running each script unless you allow it.
@@ -62,7 +88,8 @@ To update later: `claude plugin marketplace update photocraft-skills`, then
 Everything the plugin runs or contacts, in full:
 
 - **Runs locally:** Python 3 scripts in `skills/photocraft/scripts/`, the PhotoCraft app and
-  `photocraft-cli` as local processes, and macOS `pgrep` / `mdfind` to find them.
+  `photocraft-cli` as local processes, macOS `pgrep` / `mdfind` to find them, and `mdls` to read
+  photos' capture times when looking for a donor frame (feature swap).
 - **Network:** `127.0.0.1` only, for the PhotoCraft control channel. Nothing else, no downloads and
   no telemetry: your photos never leave your Mac.
 - **Writes:** `~/.photocraft-skill/` (control token, launch state, working files) and the edited
@@ -86,8 +113,8 @@ Everything the plugin runs or contacts, in full:
 .claude-plugin/plugin.json        plugin manifest
 .claude-plugin/marketplace.json   this repo is also its own marketplace
 skills/photocraft/SKILL.md        the skill
-skills/photocraft/references/     command reference, live-app and headless guides, skin-retouch workflow
-skills/photocraft/scripts/        pc.py (control channel + CLI helper) and the retouch planners
+skills/photocraft/references/     command reference, live-app and headless guides, one guide per retouching workflow
+skills/photocraft/scripts/        pc.py (control channel + CLI helper), the workflow planners, import_layers.py
 ```
 
 ## License

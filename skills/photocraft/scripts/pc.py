@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """PhotoCraft helper: drive the live desktop app over its JSON control channel,
 and find the headless `photocraft-cli` (`cli-info` says which release to get).
+`script --open/--save` and the Headless class run the same steps in a `photocraft-cli serve` session.
 
 Standard library only, and no internet access: it talks to 127.0.0.1 only.
 Run `pc.py -h` or `pc.py <subcommand> -h` for usage.
@@ -128,6 +129,44 @@ class Control:
             self.sock.close()
         except Exception:
             pass
+
+
+class Headless:
+    """The same call() as Control, answered by one `photocraft-cli serve` session instead of the app, so a script
+    can build layers in a file with no window. The few live-only methods the planning scripts use are mapped:
+    app.open -> doc.open, app.save -> doc.save, ui.inspect -> {"session": session.list}."""
+
+    def __init__(self, read_root=None, write_root=None):
+        cli = find_cli()
+        if not cli:
+            die("photocraft-cli not found; `pc.py cli-info` names the one to install and where it goes")
+        roots = [str(Path(r or Path.home()).expanduser().resolve()) for r in (read_root, write_root)]
+        self.proc = subprocess.Popen([str(cli), "serve", "--automation-read-root", roots[0], "--automation-write-root", roots[1]],
+                                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        self.next_id = 0
+
+    def call(self, method, params=None):
+        if method == "ui.inspect":
+            r = self.call("session.list")
+            return {**r, "result": {"session": r.get("result")}} if r.get("ok") else r
+        method = {"app.open": "doc.open", "app.save": "doc.save"}.get(method, method)
+        self.next_id += 1
+        self.proc.stdin.write(json.dumps({"id": self.next_id, "method": method, "params": params or {}}) + "\n")
+        self.proc.stdin.flush()
+        while True:
+            line = self.proc.stdout.readline()
+            if not line:
+                raise ConnectionError("photocraft-cli serve exited")
+            reply = json.loads(line)
+            if reply.get("id") == self.next_id:
+                return reply
+
+    def close(self):
+        try:
+            self.proc.stdin.close()
+            self.proc.wait(timeout=60)
+        except Exception:
+            self.proc.kill()
 
 
 def port_open(port):
@@ -311,7 +350,24 @@ def cmd_script(args):
                     return False
         return failed == 0
 
-    sys.exit(0 if with_control(args, run) else 1)
+    if not args.open:
+        sys.exit(0 if with_control(args, run) else 1)
+    # headless: the same steps on a file, in one photocraft-cli serve session, saved to --save
+    if not args.save:
+        die("--open needs --save")
+    c = Headless()
+    try:
+        r = c.call("doc.open", {"path": str(Path(args.open).expanduser().resolve())})
+        if not r.get("ok"):
+            die(f"cannot open {args.open}: {r.get('error')}")
+        ok = run(c)
+        r = c.call("doc.save", {"path": str(Path(args.save).expanduser().resolve())})
+        if not r.get("ok"):
+            die(f"cannot save {args.save}: {r.get('error')}")
+        print(json.dumps({"saved": str(Path(args.save).expanduser().resolve())}))
+    finally:
+        c.close()
+    sys.exit(0 if ok else 1)
 
 
 def cmd_screenshot(args):
@@ -431,6 +487,8 @@ def main():
     p.add_argument("file", help="path or - for stdin")
     p.add_argument("--keep-going", action="store_true")
     p.add_argument("--max-chars", type=int, default=2000)
+    p.add_argument("--open", help="headless: run the steps on this image in photocraft-cli serve instead of the app")
+    p.add_argument("--save", help="headless: where to save the result (.psd keeps layers); needed with --open")
     p.set_defaults(fn=cmd_script)
 
     p = sub.add_parser("screenshot", help="save a PNG of the app window to any path")

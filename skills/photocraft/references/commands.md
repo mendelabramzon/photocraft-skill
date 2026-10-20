@@ -18,8 +18,8 @@ Every `layer.newAdjustmentLayer.X` has a destructive twin `image.adjustments.X` 
 params, applied to the active pixel layer.
 
 ## Contents
-- Document & canvas · Layers · Adjustments · Selections & masks · Filters · Type
-- Shapes & painting · Layer styles · Transform · Export
+- Document & canvas · Layers · Adjustments · Selections & masks · Filters · Retouching tools
+- Type · Shapes & painting · Layer styles · Transform · Export
 
 ## Document & canvas
 
@@ -36,6 +36,7 @@ params, applied to the active pixel layer.
   `{"width":px,"height":px,"relative":bool=false,"anchor":"topLeft|top|topRight|left|center|right|bottomLeft|bottom|bottomRight"="center","extensionColor":"background|foreground|white|black|transparent|#rrggbb"="background"}`
 - `image.crop` — Crop
   `{"x":px,"y":px,"width":px,"height":px,"angle":-3600..3600=0,"deleteCroppedPixels":bool=true,"targetWidth":px,"targetHeight":px,"resolution":ppi,"resample":"bicubic|bilinear|nearest|lanczos|preserveDetails"="bicubic"} → {x,y,width,height,documentWidth,documentHeight,resolution} (targetWidth/targetHeight, both or neither: the cropped area is resampled to exactly that size, as Image Size, in the same undo step; resolution: the document's new ppi)`
+  With `angle` the box is centred on (x + w/2, y + h/2) and turned clockwise, so the content turns counter-clockwise: a horizon falling to the right needs that same positive angle. Corners outside the photo fill with the background colour; a rect beyond the canvas is allowed (Reveal All brings kept pixels back).
 - `image.trim` — Trim…
   `{"basedOn":"transparent|topLeft|bottomRight"="transparent","top":bool=true,"bottom":bool=true,"left":bool=true,"right":bool=true}`
 - `image.imageRotation.90cw` — 90° Clockwise
@@ -50,6 +51,21 @@ params, applied to the active pixel layer.
   `{"document":index?}`
 - `document.pixel` — Read Composite Pixel
   `{"x":i32,"y":i32}`
+- `document.sampleColor` — Sample Color
+  `{"x":f64,"y":f64,"size":"point"|1|3|5|11|31|51|101=1,"sampleLayer":"current"|"currentAndBelow"|"all"|"allNoAdjustments"|"currentAndBelowNoAdjustments"="all"} → [r,g,b,a] (the Eyedropper's Sample Size and Sample: the composite pixel, or the average of the size×size square centred on it, clipped to the canvas; transparent off the canvas)`
+  Values 0..1, not 0..255.
+- `document.activate` — Activate Document
+  `{"document":index}`
+- `image.revealAll` — Reveal All
+  `{}`
+- `image.mode.rgb` — RGB Color
+  `{"profile":"<builtin id>|working|/path/to/profile.icc"=working,"intent":"perceptual|relative|saturation|absolute"="relative","bpc":bool=true}`
+- `edit.profileInfo` — Profile Info
+  `{"profile":"<builtin id>|document|/path/to/profile.icc"=document}`
+- `edit.assignProfile` — Assign Profile…
+  `{"profile":"working|srgb|display-p3|adobe-rgb-compat|prophoto-compat|linear-srgb|rec2020|gray-gamma-2.2|sgray|lab-d50|coated-cmyk|none" (or a path to an .icc file)}`
+- `edit.convertToProfile` — Convert to Profile…
+  `{"profile":"srgb|display-p3|adobe-rgb-compat|prophoto-compat|linear-srgb|rec2020|gray-gamma-2.2|sgray|lab-d50|coated-cmyk|working" (or a path to an .icc file),"intent":"perceptual|relative|saturation|absolute"="relative","bpc":bool=true}`
 - `edit.undo` — Undo
   `{}`
 - `edit.redo` — Redo
@@ -89,13 +105,35 @@ params, applied to the active pixel layer.
   `{"from":"#rrggbb","to":"#rrggbb","angle":deg=90,"style":"linear|radial|angle|reflected|diamond","reverse":bool,"path":"work"|saved path name|{…path}? (the active path: becomes the vector mask; else the selection is the layer mask)}`
 - `layer.align.horizontalCenters` — Horizontal Centers
   `{"to":"auto|layers|selection|canvas"="auto"} (auto: the selection bounds with one layer and an active selection, else the selected layers' bounds)`
+- `layer.copyToDocument` — Copy Layers to Document
+  `{"document":index (destination),"layers":[id,…]?=the source's selected layers,"source":index?=active,"center":bool=false (centre on the destination's canvas),"at":[x,y]? (centre the copies on this point),"offset":[dx,dy]?=[0,0] (from their place in the source)}`
+  A command (`$PC exec`); without at, offset or center the copy keeps its pixel position.
+- `layer.stampVisible` — Stamp Visible
+  `{} → {layer} (every visible layer merged into a new layer above the active one; the originals stay)`
+  Merges everything visible into the new layer, wherever it sits in the stack.
+- `layer.createClippingMask` — Create Clipping Mask
+  `{"layer":id?} (no layer: every selected layer but the lowest clips to the layer below it)`
+- `select.findLayers` — Find Layers
+  `{"name":str (case-insensitive substring)}`
+  Selects layers by name, so a steps file can target them without knowing their ids.
+- `layer.smartFilter.setParams` — Edit Smart Filter
+  `{"layer":id?,"index":u32?,"params":{…} (merged)}`
+  Re-edits a smart filter (e.g. Camera Raw) without rebuilding it.
+- `edit.autoAlignLayers` — Auto-Align Layers…
+  `{"projection":"auto|perspective|cylindrical|spherical|collage|reposition","reference":layer id?=bottom selected layer,"geometricCorrection":bool=false,"interpolation":"bicubic|bilinear|nearest"}`
+  Aligns whole, nearly identical frames only (a tripod sequence); on patches it fails.
+- `layer.smartObjects.stackMode.median` — Median
+  `{"layer":id?}`
+  After auto-align + convert to one smart object: whatever moved between frames disappears.
 
 ## Adjustments (non-destructive layer vs. direct)
 
 - `layer.newAdjustmentLayer.levels` — Levels…
   `{"inBlack":0..253=0,"gamma":0.01..9.99=1,"inWhite":2..255=255,"outBlack":0..255=0,"outWhite":0..255=255,"red":json,"green":json,"blue":json} (top level = composite; per channel {"inBlack","gamma","inWhite","outBlack","outWhite"} under red/green/blue, gray, cyan/magenta/yellow/black or lightness/a/b) + mask*`
+  Gamma has a slope-limited toe near black, not t^(1/gamma): predict with Curves when a result must be exact.
 - `layer.newAdjustmentLayer.curves` — Curves…
   `{"points":json,"red":json,"green":json,"blue":json,"eyedropper":json} (curves as [[in,out],…] in 0..255, 2..19 points: points = composite; red/green/blue, gray, cyan/magenta/yellow/black or lightness/a/b per channel; eyedropper = the dialog's Set Black/Neutral Gray/White Point picker {"point":"black|gray|white","at":[x,y]} or {"point",…,"color":[r,g,b] 0..1}, RGB and Grayscale (no gray) only, applied over the given curves) + mask*`
+  A natural cubic spline per curve, the end values held beyond the first and last point (`imgops.spline_lut`); within one layer the channel curves apply first, then the composite.
 - `layer.newAdjustmentLayer.brightnessContrast` — Brightness/Contrast…
   `{"brightness":-150..150=0,"contrast":-50..100=0,"legacy":bool=false} + mask*`
 - `layer.newAdjustmentLayer.exposure` — Exposure…
@@ -114,6 +152,16 @@ params, applied to the active pixel layer.
   `{"stops":json,"reverse":bool=false,"dither":bool=false} (stops [[location 0..1, "#rrggbb"], …], 2..64) + mask*`
 - `layer.newAdjustmentLayer.colorLookup` — Color Lookup…
   `{"lut":"none|warm|cool|tealOrange|bleachBypass|fadedFilm|dayForNight|monoContrast|crossProcess"="none","file":text,"interpolation":"trilinear|tetrahedral"="trilinear","dither":bool=false,"data":json} (file: .cube/.3dl/.look path; data: file text + "fileName") + mask*`
+- `image.adjustments.colorLookup.list` — List Color Lookup Looks
+  `{}`
+  → [{id, label}]: warm, cool, tealOrange, bleachBypass, fadedFilm, dayForNight, monoContrast, crossProcess.
+- `layer.newAdjustmentLayer.selectiveColor` — Selective Color…
+  `{"method":"relative|absolute"="relative","colors":"reds|yellows|greens|cyans|blues|magentas|whites|neutrals|blacks"="reds","cyan":-100..100=0,"magenta":-100..100=0,"yellow":-100..100=0,"black":-100..100=0,"reds":json} (per-range [c,m,y,k] arrays: reds yellows greens cyans blues magentas whites neutrals blacks) + {"path":"work"|saved path name|{…path}? (the active path: becomes the vector mask; else the selection is the layer mask, or white with no selection)}`
+- `layer.newAdjustmentLayer.channelMixer` — Channel Mixer…
+  `{"red":json,"green":json,"blue":json,"gray":json,"monochrome":bool=false} (per output channel [red %, green %, blue %, constant %] in -200..200; gray = the monochrome mix) + {"path":"work"|saved path name|{…path}? (the active path: becomes the vector mask; else the selection is the layer mask, or white with no selection)}`
+- `image.adjustments.matchColor` — Match Color…
+  `{"source":doc,"sourceLayer":json,"luminance":1..200=100,"intensity":1..200=100,"fade":0..100=0,"neutralize":bool=false,"useSelectionInSource":bool=false,"useSelectionInTarget":bool=false} (source: document index; sourceLayer: layer id, default the merged image)`
+  Destructive; `color_check.py match` gives the same as an editable Curves layer.
 - `layer.setAdjustment` — Adjustment Properties
   `{"layer":id?, …params of that adjustment kind}`
 - `image.adjustments.desaturate` — Desaturate
@@ -147,18 +195,44 @@ params, applied to the active pixel layer.
   `{"sampleAllLayers":bool=true,"mode":"replace|add|subtract|intersect"="replace"}`
 - `select.sky` — Sky
   `{"mode":"replace|add|subtract|intersect"="replace","sampleAllLayers":bool=true,"threshold":0..100=50 (higher = stricter),"softness":0..100=50 (edge softness)} → {selected, changed, coverage (0–1 of the canvas), bounds [x,y,w,h]}`
+  In 0.7.0 a smooth blob 10–20 px off the real skyline: refine it with `sky_mask.py`, don't use it as the mask.
 - `select.object` — Object Selection
   `{"rect":[x,y,w,h],"mode":"replace|add|subtract|intersect"="replace","sampleAllLayers":bool=false}`
+- `select.quick` — Quick Selection
+  `{"points":[[x,y],…],"size":px=30,"mode":"add|subtract|replace"="add","sampleAllLayers":bool=false,"enhanceEdge":bool=false}`
+  Floods into a white backdrop around white products; trace with select.lasso there.
+- `select.refineEdge` — Refine Edge
+  `{"radius":px=0,"smartRadius":bool=false,"smooth":0..100=0,"feather":px=0,"contrast":0..100=0,"shiftEdge":-100..100=0,"decontaminate":bool=false,"amount":0..100=100,"output":"selection|layerMask|newLayer|newLayerWithMask"="selection","sampleAllLayers":bool=false}`
+  Product edge: radius 1, contrast 25; hair and fur: radius 8, smartRadius, decontaminate. shiftEdge moves whole pixels at radius 1 (-15..-25 = one pixel in).
 - `select.modify.feather` — Feather…
   `{"radius":0.1..1000=1,"applyAtCanvasBounds":bool=false}`
 - `select.modify.expand` — Expand…
   `{"radius":1..500=1,"applyAtCanvasBounds":bool=false}`
+- `select.modify.contract` — Contract…
+  `{"radius":1..500=1,"applyAtCanvasBounds":bool=false}`
+  Leaves a binary (jagged) edge: run refineEdge after it.
 - `layer.layerMask.revealSelection` — Reveal Selection
   `{"layer":id?} (no layer: every selected layer that can take a mask)`
 - `layer.layerMask.revealAll` — Reveal All
   `{"layer":id?} (no layer: every selected layer that can take a mask)`
 - `layer.layerMask.apply` — Apply
   `{"layer":id?}`
+- `select.loadSelection` — Load Selection…
+  `{"channel":index|name|"composite"|"red|green|blue|…"|"transparency"|"mask"|"vectorMask"|"quickMask"|"selection","layer":id?,"document":index?,"invert":bool=false,"operation":"new|add|subtract|intersect"="new"}`
+  A grey layer's red channel ("gray" in a Grayscale document) becomes a soft selection; the next adjustment layer takes it as its mask.
+- `layer.matting.colorDecontaminate` — Color Decontaminate…
+  `{"amount":0..100=100,"radius":1..100=4}`
+  The matting commands act on transparency only: on a masked layer they change nothing, so apply the mask on a copy first.
+- `layer.matting.defringe` — Defringe…
+  `{"width":1..200=1}`
+- `layer.matting.removeWhiteMatte` — Remove White Matte
+  `{}`
+- `layer.matting.removeBlackMatte` — Remove Black Matte
+  `{}`
+- `layer.layerMask.linked` — Unlink Layer Mask
+  `{"layer":id?,"linked":bool? (default: toggle)}`
+  Masks are linked by default, so `edit.transform` moves the mask with its layer: unlink first to move a layer
+  under a fixed mask (a sky photo under a skyline mask).
 - `edit.fill` — Fill…
   `{"contents":"foreground|background|color|contentAware|pattern|history|black|gray|white"="color","color":"#rrggbb|[r,g,b,a]"=foreground (contents=color),"pattern":id|name (contents=pattern),"scale":%=100,"angle":deg,"state":index? (contents=history; default the oldest state),"colorAdaptation":bool=true (contents=contentAware),"mode":"normal|multiply|…"="normal","opacity":0..100=100,"preserveTransparency":bool=false,"target":"pixels"|"mask"|"quickMask"|{"channel":i}?}`
 - `edit.stroke` — Stroke…
@@ -184,6 +258,12 @@ params, applied to the active pixel layer.
   `{"strength":0..10=6,"preserveDetails":0..100=60,"reduceColorNoise":0..100=45,"sharpenDetails":0..100=25,"removeJpegArtifact":bool}`
 - `filter.noise.addNoise` — Add Noise…
   `{"amount":0.1..400=12.5,"distribution":"uniform|gaussian","monochromatic":bool,"seed":u32=0}`
+- `filter.noise.median` — Median…
+  `{"radius":1..500=1}`
+  Radius r removes specks up to about 1.4r across and lines up to about 0.8r wide.
+- `filter.noise.dustAndScratches` — Dust & Scratches…
+  `{"radius":1..500=1,"threshold":0..255=0}`
+  The median wherever |pixel - median| > threshold; never over a whole photo, only through a mask.
 - `filter.other.highPass` — High Pass…
   `{"radius":0.1..1000=10}`
 - `filter.stylize.oilPaint` — Oil Paint…
@@ -194,6 +274,36 @@ params, applied to the active pixel layer.
   `{"seed":u32=0}`
 - `filter.convertForSmartFilters` — Convert for Smart Filters
   `{"layer":id?} (default: combine selected layers)`
+- `filter.cameraRaw` — Camera Raw Filter…
+  `{"temperature":-100..100=0,"tint":-100..100=0,"exposure":-5..5=0,"contrast":-100..100=0,"highlights":-100..100=0,"shadows":-100..100=0,"whites":-100..100=0,"blacks":-100..100=0,"texture":-100..100=0,"clarity":-100..100=0,"dehaze":-100..100=0,"vibrance":-100..100=0,"saturation":-100..100=0,"curveHighlights":-100..100=0,"curveLights":-100..100=0,"curveDarks":-100..100=0,"curveShadows":-100..100=0,"curveSplits":[25,50,75],"pointCurve":[[in,out]],"pointCurveRed":[[in,out]],"pointCurveGreen":[[in,out]],"pointCurveBlue":[[in,out]],"hslHue":[8],"hslSat":[8], …`
+  Works as a smart filter (filter.convertForSmartFilters first), re-editable with layer.smartFilter.setParams.
+- `filter.lensCorrection` — Lens Correction…
+  `{"profile":"none|auto|generic","focalLength":mm=0,"correctDistortion":bool=true,"correctVignette":bool=true,"correctCA":bool=true,"autoScale":bool=false,"distortion":-100..100=0,"redCyan":-100..100=0,"blueYellow":-100..100=0,"vignetteAmount":-100..100=0,"vignetteMidpoint":0..100=50,"vertical":-100..100=0,"horizontal":-100..100=0,"angle":-180..180=0,"scale":50..150=100,"edge":"transparency|edgeExtension|black|white","straighten":[[x,y],[x,y]]?}`
+  Distortion +N pushes the edges out (fixes barrel), vertical -N widens the top (fixes a looking-up shot), angle +N turns clockwise; a smart filter on a smart object.
+
+## Retouching tools
+
+Work on an empty layer above the photo (or a duplicate). Steps planned by the scripts carry an explicit
+`"layer"` and `"target": "pixels"`.
+
+- `paint.spotHealing` — Spot Healing Brush
+  `{"points":[[x,y,pressure?],…],"size":1..5000 px=tool size,"hardness":0..100=tool hardness,"opacity":1..100=100,"flow":1..100=100,"spacing":1..1000 (% of size)=Brush Settings spacing,"layer":id?=active,"target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target,"type":"contentAware|createTexture|proximityMatch"="contentAware","sampleAllLayers":bool=false}`
+  Small specks on even ground; content-aware.
+- `paint.healingBrush` — Healing Brush
+  `{"points":[[x,y,pressure?],…],"size":1..5000 px=tool size,"hardness":0..100=tool hardness,"opacity":1..100=100,"flow":1..100=100,"spacing":1..1000 (% of size)=Brush Settings spacing,"layer":id?=active,"target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target,"source":[sx,sy] | "offset":[dx,dy],"aligned":bool=true,"sampleLayer":"current|currentAndBelow|all"="current","mode":"normal|…"="normal" → {"damage","offset","aligned","nextSource"}}`
+  Copies texture from source/offset and takes its tone from the dab's rim. On an empty layer pass "sampleLayer": "currentAndBelow" (with "current" it does nothing and still returns ok). A multi-point stroke heals dab by dab, with one offset: a parallel strip, the wire stroke.
+- `paint.cloneStamp` — Clone Stamp
+  `{"points":[[x,y,pressure?],…],"size":1..5000 px=tool size,"hardness":0..100=tool hardness,"opacity":1..100=100,"flow":1..100=100,"spacing":1..1000 (% of size)=Brush Settings spacing,"layer":id?=active,"target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target,"source":[sx,sy] (sampled under the first point) | "offset":[dx,dy],"aligned":bool=true,"sampleLayer":"current|currentAndBelow|all"="current","mode":"normal|multiply|…"="normal" → {"damage","offset","aligned","nextSource"}}`
+  For edges and structure, where healing smears: hardness 60-90, offset along the edge.
+- `paint.patch` — Patch
+  `{"offset":[dx,dy] (how far the selection was dragged),"mode":"source|destination"="source","contentAware":bool=false (fill the selection content-aware from the dragged-to place; a background job),"structure":1..7=4 (content-aware: 3..7 copy the middle exactly, 1..2 re-synthesise more of it),"color":0..10=0 (content-aware: how far the copy's level adapts to the selection's surroundings),"sampleAllLayers":bool=false (content-aware),"layer":id?=active,"target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target} → {"damage","offset"}`
+  From a selection: offset points at a donor on the same plane and light; content-aware patch and fill smeared high-key areas in 0.7.0.
+- `paint.remove` — Remove
+  `{"points":[[x,y,pressure?],…],"size":1..5000 px=tool size,"hardness":0..100=tool hardness,"opacity":1..100=100,"flow":1..100=100,"spacing":1..1000 (% of size)=Brush Settings spacing,"layer":id?=active,"target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target,"closeLoops":bool=true (a stroke around an object removes what it encloses),"sampleAllLayers":bool=false → {"damage"} (a background job)}`
+  A background job; content-aware; clean on wires, specks and flakes, smears person-sized areas; closeLoops fills what a loop encloses.
+- `paint.redEye` — Red Eye
+  `{"x":px, "y":px} | {"points":[[x,y],…] (at most 64)},"pupilSize":1..100=50,"darken":0..100=50,"layer":id?=active,"target":"pixels"|"mask"|"quickMask"|{"channel":i} → {"damage":[x,y,w,h], "pixels":n}`
+  The defaults leave a pink pupil on strong red-eye; pupilSize 100, darken 80-100 gave a dark one.
 
 ## Type
 
@@ -247,10 +357,20 @@ params, applied to the active pixel layer.
 
 - `edit.transform` — Free Transform
   `{"layer":id?,"rect":[x0,y0,x1,y1]? (source frame; default = layer content ∩ selection),"quad":[[x,y]×4]? (where the frame's corners go, clockwise from top-left),"matrix":[a,b,c,d,e,f]? (affine alternative),"interpolation":"bicubic|bilinear|nearest"="bicubic","target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target (an unlinked mask, an alpha channel or the Quick Mask transforms alone; a linked mask moves with its layer)}`
+  The quad is a true projective homography. It moves only the active layer (a Background becomes "Layer 0"), and pixels pushed off the canvas are kept. `matrix` [a,b,c,d,e,f]: x' = a·x + c·y + e, y' = b·x + d·y + f, in document coordinates.
 - `edit.transform.flipHorizontal` — Flip Horizontal
   `{}`
 - `edit.transform.warp` — Warp
   `{"layer":id?,"rect":[x0,y0,x1,y1]? (warp box; default = layer content ∩ selection),"style":"custom|none|arc|arcLower|arcUpper|arch|bulge|shellLower|shellUpper|flag|wave|fish|rise|fisheye|inflate|squeeze|twist","bend":%=50,"hDistort":%,"vDistort":%,"vertical":bool,"mesh":{"us":[0,…,1],"vs":[0,…,1],"points":[[x,y]…]} ((3c+1)×(3r+1) control points, row-major, document px),"grid":[cols,rows]?,"warp":{full warp object}?,"interpolation":"bicubic|bilinear|nearest"}`
+- `edit.perspectiveWarp` — Perspective Warp
+  `{"planes":[{"src":[[x,y]×4],"dst":[[x,y]×4]}…] (corners clockwise from top-left; corners that coincide in src are linked),"straighten":"horizontal|vertical|auto"?,"interpolation":"bicubic|bilinear|nearest","layer":id?}`
+  Not yet exercised by these workflows; straighten.py uses edit.transform's quad.
+- `image.analysis.rulerTool` — Ruler Tool
+  `{"start":[x,y],"end":[x,y],"protractor":[x,y]|null?,"clear":bool=false} (no params: read) → X/Y/W/H/angle/L1/L2`
+  Angle is y-up: a line falling to the right reads negative.
+- `image.analysis.straightenLayer` — Straighten Layer
+  `{"crop":bool=(active layer is the Background)} (rotates so the ruler line is level; crop = rotate the canvas and crop to the image)`
+  Levels the ruler line and crops to the largest rectangle with the photo's aspect.
 
 ## Export
 

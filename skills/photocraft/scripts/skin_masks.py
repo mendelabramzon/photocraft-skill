@@ -33,138 +33,10 @@ import sys
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
 import pngio
+from imgops import gauss, lum, lut_f, raster, save_gray, set_lum, spline_lut
 
 DODGE = [[0, 0], [128, 160], [255, 255]]
 BURN = [[0, 0], [128, 96], [255, 255]]
-
-
-# ---------------------------------------------------------------- filters on flat row-major float lists
-
-def _box_rows(src, w, h, r):
-    if r < 1:
-        return src[:]
-    inv = 1.0 / (2 * r + 1)
-    out = []
-    for y in range(h):
-        row = src[y * w:(y + 1) * w]
-        pad = [row[0]] * r + row + [row[-1]] * (r + 1)
-        acc = sum(pad[:2 * r + 1])
-        res = [0.0] * w
-        for x in range(w):
-            res[x] = acc * inv
-            acc += pad[x + 2 * r + 1] - pad[x]
-        out.extend(res)
-    return out
-
-
-def _transpose(src, w, h):
-    rows = [src[y * w:(y + 1) * w] for y in range(h)]
-    return [v for col in zip(*rows) for v in col]
-
-
-def _box_radii(sigma, n=3):
-    wi = math.sqrt(12 * sigma * sigma / n + 1)
-    wl = int(wi)
-    if wl % 2 == 0:
-        wl -= 1
-    m = round((12 * sigma * sigma - n * wl * wl - 4 * n * wl - 3 * n) / (-4 * wl - 4))
-    return [(wl - 1) // 2 if i < m else (wl + 1) // 2 for i in range(n)]
-
-
-def gauss(src, w, h, sigma):
-    """Gaussian blur (three box passes each way), edges clamped."""
-    if sigma <= 0:
-        return src[:]
-    rs = _box_radii(sigma)
-    a = src
-    for r in rs:
-        a = _box_rows(a, w, h, r)
-    a = _transpose(a, w, h)
-    for r in rs:
-        a = _box_rows(a, h, w, r)
-    return _transpose(a, h, w)
-
-
-def spline_lut(pts):
-    """PhotoCraft Curves = natural cubic spline through the points (verified against 0.7.0)."""
-    xs = [p[0] for p in pts]; ys = [p[1] for p in pts]; n = len(pts)
-    hs = [xs[i + 1] - xs[i] for i in range(n - 1)]
-    a = [[0.0] * n for _ in range(n)]; b = [0.0] * n
-    a[0][0] = a[n - 1][n - 1] = 1.0
-    for i in range(1, n - 1):
-        a[i][i - 1], a[i][i], a[i][i + 1] = hs[i - 1], 2 * (hs[i - 1] + hs[i]), hs[i]
-        b[i] = 6 * ((ys[i + 1] - ys[i]) / hs[i] - (ys[i] - ys[i - 1]) / hs[i - 1])
-    for i in range(n):
-        for j in range(i + 1, n):
-            f = a[j][i] / a[i][i]
-            for k in range(n):
-                a[j][k] -= f * a[i][k]
-            b[j] -= f * b[i]
-    m = [0.0] * n
-    for i in range(n - 1, -1, -1):
-        m[i] = (b[i] - sum(a[i][k] * m[k] for k in range(i + 1, n))) / a[i][i]
-    lut = []
-    for x in range(256):
-        i = next((k for k in range(n - 1) if x <= xs[k + 1]), n - 2)
-        t0, t1, hh = xs[i + 1] - x, x - xs[i], hs[i]
-        v = (m[i] * t0 ** 3 + m[i + 1] * t1 ** 3) / (6 * hh) + (ys[i] / hh - m[i] * hh / 6) * t0 + (ys[i + 1] / hh - m[i + 1] * hh / 6) * t1
-        lut.append(max(0, min(255, round(v))))
-    return lut
-
-
-def lut_f(lut, v):
-    v = 0.0 if v < 0 else 255.0 if v > 255 else v
-    i = int(v)
-    if i >= 255:
-        return float(lut[255])
-    t = v - i
-    return lut[i] * (1 - t) + lut[i + 1] * t
-
-
-def lum(r, g, b):
-    return 0.3 * r + 0.59 * g + 0.11 * b  # PhotoCraft's Luminosity / Color blend weights
-
-
-def set_lum(r, g, b, l):
-    d = l - lum(r, g, b)
-    r, g, b = r + d, g + d, b + d
-    L = lum(r, g, b); n = min(r, g, b); x = max(r, g, b)
-    if n < 0 and L - n > 1e-9:
-        k = L / (L - n); r, g, b = L + (r - L) * k, L + (g - L) * k, L + (b - L) * k
-    if x > 255 and x - L > 1e-9:
-        k = (255 - L) / (x - L); r, g, b = L + (r - L) * k, L + (g - L) * k, L + (b - L) * k
-    return r, g, b
-
-
-def raster(cfg, ox, oy, w, h):
-    """Binary skin mask of the crop: skin polygon(s) minus exclusion boxes/polygons."""
-    def fill(m, pts, val):
-        n = len(pts)
-        for y in range(h):
-            Y = y + oy
-            xs = []
-            for i in range(n):
-                (x0, y0), (x1, y1) = pts[i], pts[(i + 1) % n]
-                if (y0 > Y) != (y1 > Y):
-                    xs.append(x0 + (Y - y0) * (x1 - x0) / (y1 - y0))
-            xs.sort()
-            for k in range(0, len(xs) - 1, 2):
-                a = max(0, math.ceil(xs[k] - ox)); b = min(w - 1, math.floor(xs[k + 1] - ox))
-                for x in range(a, b + 1):
-                    m[y * w + x] = val
-    m = [0.0] * (w * h)
-    skins = cfg["skin"] if isinstance(cfg["skin"][0][0], (list, tuple)) else [cfg["skin"]]
-    for pts in skins:
-        fill(m, pts, 1.0)
-    for e in cfg.get("exclude", []):
-        if isinstance(e[0], (list, tuple)):
-            fill(m, e, 0.0)
-        else:
-            x0, y0, x1, y1 = e
-            for y in range(max(0, y0 - oy), min(h, y1 - oy + 1)):
-                for x in range(max(0, x0 - ox), min(w, x1 - ox + 1)):
-                    m[y * w + x] = 0.0
-    return m
 
 
 def local_plane(fs, wt, w, h, sigma, ridge=0.05):
@@ -220,10 +92,6 @@ def gradient_att(img, w, h, edge):
             gx = (img[i + 1] - img[i - 1]) / 2; gy = (img[i + w] - img[i - w]) / 2
             att[i] = 1 / (1 + (gx * gx + gy * gy) / (edge * edge))
     return att
-
-
-def save_gray(path, w, h, vals):
-    pngio.write(path, w, h, [[(int(v * 255 + 0.5),) * 3 for v in vals[y * w:(y + 1) * w]] for y in range(h)])
 
 
 def main():

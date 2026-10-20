@@ -14,12 +14,8 @@ import sys
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
 import pngio
+from imgops import FONT
 
-FONT = {  # 3x5 digits
-    "0": "111101101101111", "1": "010110010010111", "2": "111001111100111", "3": "111001111001111",
-    "4": "101101111001001", "5": "111100111001111", "6": "111100111101111", "7": "111001001001001",
-    "8": "111101111101111", "9": "111101111001111",
-}
 
 ap = argparse.ArgumentParser()
 ap.add_argument("crop"); ap.add_argument("ox", type=int); ap.add_argument("oy", type=int); ap.add_argument("out")
