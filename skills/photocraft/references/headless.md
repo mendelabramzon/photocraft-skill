@@ -25,7 +25,8 @@ Paths given to the CLI are ordinary paths; there are no automation roots in `run
     pc.py cli serve [--automation-read-root dir] [--automation-write-root dir]
     pc.py cli mcp   [--bridge 127.0.0.1:PORT --control-token-file FILE] [roots…]
 
-A flag the subcommand doesn't take is an error (exit 2), not silently ignored.
+A flag the subcommand doesn't take is an error (exit 2), not silently ignored. `info` doesn't name the colour
+profile; `pc.py cli run file --cmd edit.profileInfo --params '{"profile": "document"}'` does (its `profile`).
 
 ## `run`: one document, many commands
 

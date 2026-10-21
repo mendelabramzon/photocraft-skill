@@ -50,6 +50,10 @@ practice), and what testing in PhotoCraft 0.7.0 added:
   land looks stuck on.
 - **Haze and reflections.** Haze near the horizon blends a too-dark or too-saturated sky into the land (Skylum).
   Water and windows must reflect the new sky, in its direction and colours.
+- **Light wrap.** Against a bright sky, light spills over the edges of roofs and trees; a land edge that stays
+  exactly as dark as before, right up to a new bright sky, looks cut out. Compositors wrap it: the sky blurred until
+  no cloud detail is left, in a lightening blend, along the land's edge (Planet Photoshop's light wrap; the old Inner
+  Glow, one flat colour, fails under mixed light). Subtle: a soft lighter edge at 3x, nothing at 1x.
 - **Grain and resolution.** A clean stock sky over a noisy photo, or an enlarged small sky over a sharp one, gives
   itself away. Match the grain; don't enlarge a sky more than about 1.5x.
 - **Editable.** The sky on its own layer with its mask, the land's adjustment separate, the original untouched.
@@ -62,6 +66,7 @@ practice), and what testing in PhotoCraft 0.7.0 added:
 
     Sky replacement               group, Pass Through
       Horizon haze                Solid Color = the old sky's horizon colour, mask = haze.png (optional)
+      Light wrap                  the new sky blurred, Screen, mask = wrap_mask.png: the land's edge (optional)
       Sky                         the fitted sky photo, mask = alpha.png
       Foreground harmonise        Curves (red, green, blue): the land takes part of the new light's colour
       Sky edges (decontaminated)  edge.png, mask = edge_mask.png: edge pixels with the old sky taken out
@@ -130,7 +135,7 @@ be the pale part near the horizon, not mid-sky). It should be wider than the pho
 ## Step 3: choose and fit the new sky
 
     python3 sky_check.py plan ~/.photocraft-skill/work/<photo>/sky sky.jpg [--sky-x 0.5] [--sky-y 1] [--zoom 1]
-        [--sky-rect x y w h] [--flip] [--harmonize 0.5] [--ev 0] [--haze 0.3]
+        [--sky-rect x y w h] [--flip] [--harmonize 0.5] [--ev 0] [--haze 0.3] [--wrap 0.3]
 
 - **Fit.** The CLI crops the sky photo to the crop's shape (largest part; `--sky-x` left to right, `--sky-y` 1 =
   its bottom at the skyline), resizes it, converts it to the photo's colour profile (a Display P3 sky in an sRGB
@@ -147,6 +152,12 @@ be the pale part near the horizon, not mid-sky). It should be wider than the pho
 - **Haze.** `--haze 0.2..0.4` lays the old sky's horizon colour over the new sky, strongest at the horizon (a
   straight line fitted under the skyline, so it doesn't step at trees) and fading up over `--haze-height` (0.35)
   of the sky. Use it when the new sky is darker or more saturated near the horizon than the land can carry.
+- **Light wrap.** `--wrap 0.3` (0.3-0.4) lays the new sky, blurred by `--wrap-blur` px (2 % of the width), over the
+  land's edge in Screen: a band on the land side of the skyline, fading over `--wrap-width` px (0.6 % of the width,
+  11.5 px on a 1920 px photo), times the land's share of each edge pixel. On two test photos it lifted that band by 14
+  levels on average at 0.3 under a cloudy sky, 17 at 0.4, and 22 at 0.3 under the pale horizon of `--clear-blue`;
+  roofs against bright cloud got a soft lighter edge at 4x. Thin branches lie wholly inside the band and turn lighter
+  and a little hazier: for a tree-lined skyline use `--wrap 0.2` or a `--wrap-width` of 4-6 px.
 - **Clear blue** (`--clear-blue`, no sky photo): a dithered gradient from `#5d8fd0` overhead to `#cfe0ef` at the
   horizon, blended in linear light; `--zenith` and `--horizon-color` change it.
 
@@ -173,8 +184,16 @@ with the original.
 
     python3 sky_check.py check ~/.photocraft-skill/work/<photo>/sky --render export.png
 
-`export.png` is a flat export of the document (`$PC export`, or the headless `--out x.png`); the script crops it. It
-takes the luminance across the sky edge in 24 px tiles: a rim right at the edge brighter than both the new sky
+`export.png` is a flat export of the document (`$PC export`, or the headless `--out x.png`); the script crops it. A
+light wrap is a deliberate light rim on the land side, so it is taken back out first (Screen inverts exactly), at the
+opacity the render shows: fitted over the wrap band against the preview, so a Light wrap layer lowered, raised or
+hidden after the import is measured right (`lightWrap` gives the planned and fitted opacity and the mean lift; the fit
+assumes the rest of the document is as planned). Tested: a 0.4 wrap as planned fitted 0.401, and taken out the median
+rim read -0.71 with 21 % of tiles light, against -0.72 and 20 % for the same sky without a wrap (measured as rendered,
+`--keep-wrap`: 1.02 and 38 %). A 0.3 plan whose layer was lowered to 0.15 fitted 0.15 and read exactly what a 0.15
+plan reads (mean lift 8.35, 1 dark-rim tile), where taking out the planned 0.3 had read a lift of 17.8 and 25 dark-rim
+tiles; with the layer hidden it fitted 0.0 and read like the plan without a wrap.
+It takes the luminance across the sky edge in 24 px tiles: a rim right at the edge brighter than both the new sky
 beside it and the land behind it is old sky left in the edge pixels, or a mask that stops short. `check.png`
 outlines each tile: green clean, orange a light rim, red a strong or dark rim, blue a thin structure only (no
 inside to compare with: judge it by eye).
@@ -241,4 +260,6 @@ shape, not drama.
 | Sky looks pasted, dark at the horizon | Sky shot upward, no horizon part | `--sky-y` on a taller sky, or `--haze 0.3` |
 | Dark object in the new sky | A pole or tree in the part of the sky photo used | `--sky-rect` |
 | Sky softer than the photo | Enlarged more than 1.5x | A larger sky photo, or less `--zoom` |
+| Land edge glows, branches look hazy | Light wrap too strong or too wide for thin structure | `--wrap 0.2`, `--wrap-width 4`; or lower the Light wrap layer's opacity |
+| Land edge stays dark and cut-out against a bright new sky | No light wrap | `--wrap 0.3` |
 | Import "MISMATCH" with a bias of a few levels, "no builtin twin" warning | An embedded profile import_layers can't match to a builtin | `edit.convertToProfile` to the nearest builtin, import again |

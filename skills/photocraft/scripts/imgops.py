@@ -247,6 +247,127 @@ def set_lum(r, g, b, l):
     return r, g, b
 
 
+def set_sat(r, g, b, s):
+    """The colour with its saturation (max - min) set to s, hue kept (the Hue and Saturation blends)."""
+    c = [r, g, b]
+    hi, lo = max(range(3), key=c.__getitem__), min(range(3), key=c.__getitem__)
+    if c[hi] - c[lo] < 1e-9:
+        return 0.0, 0.0, 0.0
+    mid = 3 - hi - lo
+    out = [0.0, 0.0, 0.0]
+    out[mid], out[hi] = (c[mid] - c[lo]) * s / (c[hi] - c[lo]), s
+    return tuple(out)
+
+
+def _dodge(b, s):
+    return 0.0 if b <= 0 else 1.0 if s >= 1 else min(1.0, b / (1 - s))
+
+
+def _burn(b, s):
+    return 1.0 if b >= 1 else 0.0 if s <= 0 else max(0.0, 1 - (1 - b) / s)
+
+
+# one channel, below b and layer s in 0..1 (PhotoCraft 0.7.0, checked on all 65536 8-bit pairs: exact, or 1 level
+# of rounding). Soft Light is Photoshop's classic formula; the W3C/CSS one differs by up to 17 levels.
+SEPARABLE = {
+    "normal": lambda b, s: s,
+    "multiply": lambda b, s: b * s,
+    "screen": lambda b, s: 1 - (1 - b) * (1 - s),
+    "overlay": lambda b, s: 2 * b * s if b < 0.5 else 1 - 2 * (1 - b) * (1 - s),
+    "hardlight": lambda b, s: 2 * b * s if s < 0.5 else 1 - 2 * (1 - b) * (1 - s),
+    "softlight": lambda b, s: (2 * b * s + b * b * (1 - 2 * s) if s <= 0.5
+                               else 2 * b * (1 - s) + math.sqrt(b) * (2 * s - 1)),
+    "linearlight": lambda b, s: b + 2 * s - 1,
+    "vividlight": lambda b, s: (0.0 if s <= 0 else 1.0 if s >= 1  # a black or white layer wins, whatever is below
+                               else _burn(b, 2 * s) if s <= 0.5 else _dodge(b, 2 * s - 1)),
+    "pinlight": lambda b, s: min(b, 2 * s) if s <= 0.5 else max(b, 2 * s - 1),
+    "lighten": max,
+    "darken": min,
+    "colordodge": _dodge,
+    "colorburn": _burn,
+    "lineardodge": lambda b, s: b + s,
+    "linearburn": lambda b, s: b + s - 1,
+    "subtract": lambda b, s: b - s,
+    "divide": lambda b, s: (1.0 if b > 0 else 0.0) if s <= 0 else b / s,
+    "difference": lambda b, s: abs(b - s),
+    "exclusion": lambda b, s: b + s - 2 * b * s,
+}
+
+
+def blend_key(mode):
+    """'Soft Light', 'softLight', 'Linear Dodge (Add)' -> the keys above (and 'color', 'luminosity', 'hue', ...)."""
+    k = mode.lower().replace(" ", "").replace("(add)", "")
+    return {"add": "lineardodge"}.get(k, k)
+
+
+def blend(mode, below, layer, opacity=1.0):
+    """An RGB layer pixel over the RGB below it as PhotoCraft renders it, 0..255 floats in and out (not rounded):
+    the separable modes channel by channel, Color / Luminosity / Hue / Saturation with PhotoCraft's luminosity
+    weights (lum, set_lum: checked on random colour pairs, within 1 level). opacity mixes the result in, as a
+    layer's opacity or mask value does."""
+    k = blend_key(mode)
+    if k == "color":
+        out = set_lum(*layer, lum(*below))
+    elif k == "luminosity":
+        out = set_lum(*below, lum(*layer))
+    elif k == "hue":
+        out = set_lum(*set_sat(*layer, max(below) - min(below)), lum(*below))
+    elif k == "saturation":
+        out = set_lum(*set_sat(*below, max(layer) - min(layer)), lum(*below))
+    else:
+        f = SEPARABLE[k]
+        out = [255 * min(1.0, max(0.0, f(b / 255, s / 255))) for b, s in zip(below, layer)]
+    return tuple(b + opacity * (o - b) for b, o in zip(below, out))
+
+
+# ---------------------------------------------------------------- grain
+
+NOISE_PER_AMOUNT = 0.643  # filter.noise.addNoise, gaussian, monochromatic: standard deviation per unit of amount
+
+
+def grain(L, w, h, idx):
+    """Robust grain of a luminance image at pixels idx: 1.4826 x median |L - 3x3 mean| (0.943 x sigma for white
+    noise; divide by 0.943 for the sigma that Add Noise or noise() should add)."""
+    d = []
+    for i in idx:
+        x, y = i % w, i // w
+        if 0 < x < w - 1 and 0 < y < h - 1:
+            m = (L[i - w - 1] + L[i - w] + L[i - w + 1] + L[i - 1] + L[i] + L[i + 1] + L[i + w - 1] + L[i + w] + L[i + w + 1]) / 9
+            d.append(abs(L[i] - m))
+    d.sort()
+    return 1.4826 * d[len(d) // 2] if d else 0.0
+
+
+def grain_floor(L, w, h, mask, block=8, q=0.2):
+    """Grain the way a noise-floor estimate reads it: grain()'s statistic in every 8 x 8 block inside mask, then a
+    low percentile of those blocks. Texture (knitwear, foliage, brick, leather) only raises some blocks; the quietest
+    ones are grain, so two different materials can be compared. Clipped blocks are skipped; None with < 8 blocks."""
+    vals = []
+    for by in range(1, h - block - 1, block):
+        for bx in range(1, w - block - 1, block):
+            idx = [(by + y) * w + bx + x for y in range(block) for x in range(block)]
+            if not all(mask[i] for i in idx):
+                continue
+            mu = sum(L[i] for i in idx) / len(idx)
+            if mu < 10 or mu > 245:
+                continue
+            d = sorted(abs(L[i] - (L[i - w - 1] + L[i - w] + L[i - w + 1] + L[i - 1] + L[i] + L[i + 1] + L[i + w - 1]
+                                   + L[i + w] + L[i + w + 1]) / 9) for i in idx)
+            vals.append(1.4826 * d[len(d) // 2])
+    if len(vals) < 8:
+        return None
+    vals.sort()
+    return vals[int(q * (len(vals) - 1))]
+
+
+def noise(n, sigma, seed=1):
+    """n samples of reproducible Gaussian noise (mean 0): grain baked into a planner's pixel layer, so the preview
+    holds the exact pixels (PhotoCraft's own Add Noise can't be predicted pixel by pixel)."""
+    import random
+    rnd = random.Random(seed)
+    return [rnd.gauss(0.0, sigma) for _ in range(n)]
+
+
 # ---------------------------------------------------------------- area polygons (area.json)
 
 def raster(cfg, ox, oy, w, h):

@@ -344,10 +344,32 @@ def cmd_script(args):
 
     def run(c):
         failed = 0
+        target = None
+        if args.layer_name:  # ids belong to a session: look the layer up by name in this one
+            r = c.call("engine.execute", {"command": "document.inspect", "params": {}})
+            stack, found = list((r.get("result") or {}).get("layers", [])), []
+            while stack:
+                l = stack.pop()
+                if l.get("name") == args.layer_name:
+                    found.append(l["id"])
+                stack.extend(l.get("children") or [])
+            if len(found) != 1:
+                print(json.dumps({"error": f"{len(found)} layers named {args.layer_name!r} in the document; need exactly one"}))
+                return False
+            target = found[0]
+            # paint commands refuse while a group or an adjustment layer is active, even with "layer" set
+            sel = c.call("engine.execute", {"command": "layer.select", "params": {"layer": target}})
+            print(json.dumps({"layerName": args.layer_name, "layer": target, "selected": bool(sel.get("ok"))}))
         for i, step in enumerate(steps):
             method, params = norm(step)
+            if target is not None and "layer" in params:
+                params = {**params, "layer": target}
+            if target is not None and method == "engine.execute" and "layer" in params.get("params", {}):
+                params = {**params, "params": {**params["params"], "layer": target}}
             r = c.call(method, params)
             label = params.get("command", method) if method == "engine.execute" else method
+            if (not r.get("ok") and label == "select.deselect" and "no selection" in str(r.get("error"))):
+                r = {"ok": True, "result": {"note": "nothing was selected"}}  # a safety deselect is not a failure
             row = {"step": i, "call": label, "ok": r.get("ok")}
             if r.get("ok"):
                 body = r.get("result")
@@ -374,6 +396,10 @@ def cmd_script(args):
         if not r.get("ok"):
             die(f"cannot open {args.open}: {r.get('error')}")
         ok = run(c)
+        if not ok and not args.keep_going:
+            # a half-run script leaves the document half edited: never save that (--save may name the --open file)
+            print(json.dumps({"saved": None, "reason": "a step failed: nothing saved (--keep-going saves the rest)"}))
+            sys.exit(1)
         r = c.call("doc.save", {"path": str(Path(args.save).expanduser().resolve())})
         if not r.get("ok"):
             die(f"cannot save {args.save}: {r.get('error')}")
@@ -507,6 +533,8 @@ def main():
     p = sub.add_parser("script", help="run many steps over one connection (JSON array or JSON lines)")
     p.add_argument("file", help="path or - for stdin")
     p.add_argument("--keep-going", action="store_true")
+    p.add_argument("--layer-name", help="every step's \"layer\" becomes the id of the one layer with this name (ids change "
+                                        "when a file is reopened; a planner's steps then still hit their layer)")
     p.add_argument("--max-chars", type=int, default=2000)
     p.add_argument("--open", help="headless: run the steps on this image in photocraft-cli serve instead of the app")
     p.add_argument("--save", help="headless: where to save the result (.psd keeps layers); needed with --open")

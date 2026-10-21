@@ -262,7 +262,7 @@ def resample(pts, step):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("crop"); ap.add_argument("ref"); ap.add_argument("ox", type=int); ap.add_argument("oy", type=int)
     ap.add_argument("--area")
     ap.add_argument("--polarity", choices=["dark", "light"], default="dark", help="dark wires on sky, or lit ones on storm cloud")

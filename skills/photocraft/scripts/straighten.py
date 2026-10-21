@@ -648,7 +648,7 @@ def warp_preview(P, w, h, Hfull, sx, sy, rect, out_w):
 # ---------------------------------------------------------------- main
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("photo"); ap.add_argument("outdir")
     ap.add_argument("--mode", default="auto", choices=["auto", "horizon", "rotate", "verticals"])
     ap.add_argument("--amount", default="auto",

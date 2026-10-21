@@ -67,8 +67,16 @@ this:
 
 - In `$PC script`, write every editing step as `{"command": "<id>", "params": {…}}`. A `[name, params]`
   pair is a session method (`doc.open`, `doc.inspect`, …), not a command, and fails with "unknown method".
-- `--save` may name the file that `--open` opened; the new layers land on top of the old ones. To try
-  again, start from the original photo rather than from a result, so every attempt is reproducible.
+- `--save` may name the file that `--open` opened; the new layers land on top of the old ones. If a step
+  fails, nothing is saved (`"saved": null`; `--keep-going` runs the rest and saves). To try again, start
+  from the original photo rather than from a result, so every attempt is reproducible. Layer ids from one
+  run don't carry over: reopening the saved file numbers its layers afresh (`import_layers.py --out` prints them
+  as `idsInSavedFile`; `pc.py cli info` lists them all). A planner's steps carry the `--layer` id of the run
+  they were planned in: `pc.py script heal.json --open work.psd --save work.psd --layer-name Heal` points every
+  step at the one layer named Heal in this session.
+- To put a mask on a layer that already exists (an adjustment, a planner's layer):
+  `mask.py area.json m.png --size W H --apply-to <id or name> --file work.psd --save work.psd` (live: leave out
+  `--file`/`--save`). It replaces the layer's mask; a new adjustment layer's white one too.
 - Planners' `steps.json` files are already in the command form; run them with `--open`/`--save` on the
   full-size file, as SKILL.md says.
 

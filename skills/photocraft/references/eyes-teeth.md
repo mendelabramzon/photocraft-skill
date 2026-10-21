@@ -22,9 +22,16 @@ From Kristina Sherk's "Top three signs of over retouching" (KelbyOne Insider), S
 Photoshop", Nathaniel Dodson's eye retouch (tutvid), a dentist's guide to how white is too white (Dr. Frangella), and
 what held up in testing on six portraits:
 
-- **Colour first, brightness second.** "Sometimes it's more about fixing the color than it is the brightness" (Sherk).
-  Teeth: take part of the yellow out; SLR Lounge starts at yellow saturation −40 and warns "de-saturate too much and
-  you're left with gray". A brightness boost alone makes teeth glow.
+- **Colour first, brightness second, a little of each.** "Sometimes it's more about fixing the color than it is the
+  brightness" (Sherk); a brightness boost alone makes teeth glow. The sources disagree on the dose: SLR Lounge starts at
+  Yellows saturation −40 ("de-saturate too much and you're left with gray"), Macworld turns the whitening layer down to
+  about 40 % opacity, and Damien Symonds lifts Yellows lightness "sometimes as little as 10–20 %" and never desaturates
+  past 5–10 %: "grey teeth are worse than yellow teeth!". Slider numbers are a poor unit, though. Measured in PhotoCraft
+  on six portraits' teeth, Yellows Lightness +20 moved L* +0.3 to +2.0 and b* 0 to −7 %, and Saturation −40 moved b*
+  −1 to −13 %, because most teeth sit where the Reds and Yellows ranges overlap. `eyes_teeth.py` works in Lab instead:
+  on the four sets with yellow to take out in neutral light it took b* down 1.9–2.4 (to 5.9–8.0, the floor that keeps
+  teeth from going grey) and lifted L* at most 1.5; in golden light (`--light warm`) 2.5, to b* 19.9; teeth already at
+  b* 3.4 it left alone. That is Symonds' lightness, a little more colour out than any slider recipe, never past the floor.
 - **Teeth are never whiter than the eye whites.** "The whiteness of your teeth should not exceed the shade of the
   whites of your eyes (in most people)" (Frangella). Teeth also stay a little yellow: neutral or blue-white teeth read
   as fake, and in testing even bleached-looking teeth measured b* 3–8.
@@ -34,8 +41,8 @@ what held up in testing on six portraits:
   take out red, move slightly away from yellow, lighten at most next to the iris. "When people over-whiten the corners
   of the eye whites, they end up making the round eyeball look flat." Never pure white.
 - **Iris: light it from across the catchlight.** "Add extra emphasis to the side of the iris that is directly across
-  from the catchlight" and "feather in darkness for the edge of the iris" (tutvid). Keep the catchlights; never
-  recolour or enlarge an iris.
+  from the catchlight" and "feather in darkness for the edge of the iris" (tutvid); lightening the catchlight's own
+  side reads as "alien" (Dani Diamond). Keep the catchlights; never recolour or enlarge an iris.
 - **Sharpen iris and lashes only,** never the skin around them, and never so much that a catchlight gets a dark halo.
 - **Respect the light.** A golden-hour or tungsten portrait has warm eye whites and warm teeth because the light is
   warm. Neutralising them makes eyes and teeth grey-blue against warm skin. Measure the teeth against the eye whites,
@@ -60,8 +67,9 @@ what held up in testing on six portraits:
 
 Work in a folder under the home directory, e.g. `~/.photocraft-skill/work/<photo>/`.
 
-1. Do the skin retouch first if there is one. This group goes on top: its sharpening stamp merges everything below
-   it, and its colours are measured on the finished skin.
+1. Do the skin retouch and the global edits (white balance, tone, the look) first: teeth and eyes come after all of
+   them (Damien Symonds). This group goes on top: its sharpening stamp merges everything below it, and its colours
+   are measured on the finished photo, so a later grade would shift what was measured.
 2. Export the current state (`$PC export ~/.photocraft-skill/work/<photo>/state.png`), then crop the face with the
    CLI, eyes and mouth together, at full resolution and with even width and height (the masks are centred on the crop):
 

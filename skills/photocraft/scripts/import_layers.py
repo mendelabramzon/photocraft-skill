@@ -87,20 +87,30 @@ def build(c, spec, base, above=None, group=None):
     if want and not assign:  # a standard profile embedded under its own name ("ProPhoto RGB"): PhotoCraft's twin of it
         same = {b["id"] for b in builtins if b.get("colorSpace") == prof.get("colorSpace")}
         assign = next((bid for key, bid in FAMILIES if key in want.lower() and bid in same), None)
+        if not assign and want.strip().lower() == "c2" and "srgb" in same:  # the compact sRGB of many web JPEGs
+            assign = "srgb"
     if want and not assign and any("image" in L for L in spec["layers"]):  # grey masks don't care
         print(f"warning: document profile {want!r} has no builtin twin; colours may shift on import", file=sys.stderr)
 
     def bring_in(png, at):
-        """Open png, copy its layer into the main document centred on `at`; return the new layer's id."""
+        """Open png, copy its layer into the main document so the PNG's canvas is centred on `at`; return the new
+        layer's id."""
         call("app.open", {"path": os.path.join(base, png)})
         src = call("ui.inspect")["session"]["active"]
-        src_gray = run("document.inspect", {"document": src})["channels"]["composite"] == "Gray"
+        sdoc = run("document.inspect", {"document": src})
+        src_gray = sdoc["channels"]["composite"] == "Gray"
         if gray and not src_gray:
             run("image.mode.grayscale", {"profile": "sgray"})
             src_gray = True
         if assign and src_gray == gray and assign != ("sgray" if gray else None):
             run("edit.assignProfile", {"profile": assign})
-        src_layer = run("document.inspect", {"document": src})["layers"][0]["id"]
+        src_layer = sdoc["layers"][0]["id"]
+        # `at` centres the layer's visible content, not the PNG's canvas: a PNG with transparent margins (a cut-out,
+        # a reflection) would land off by its content's offset from the canvas centre (measured: a 20 px square
+        # drawn at x 20 of a 200 px PNG landed at x 90). Shift by that offset so its pixels keep their place.
+        b = sdoc["layers"][0].get("bounds")
+        if b and b[2] > 0 and b[3] > 0:
+            at = [at[0] + b[0] + b[2] / 2 - sdoc["width"] / 2, at[1] + b[1] + b[3] / 2 - sdoc["height"] / 2]
         run("document.activate", {"document": main})
         res = run("layer.copyToDocument", {"document": main, "source": src, "layers": [src_layer], "at": at})
         run("file.close", {"document": src})
@@ -159,6 +169,45 @@ def build(c, spec, base, above=None, group=None):
     return made, grp
 
 
+def apply_mask(c, png, center, layer):
+    """Make a grey PNG (a mask.py or planner mask, its centre at `center` in the document) the layer mask of an
+    existing layer of the active document, given by id or by name, replacing any mask it has (a new adjustment layer
+    always has a white one); returns (the layer's id, whether a mask was replaced)."""
+    def call(method, params=None):
+        r = c.call(method, params or {})
+        if not r.get("ok"):
+            sys.exit(f"error: {method} {json.dumps(params)[:200]}: {r.get('error')}")
+        return r.get("result")
+
+    def run(command, params=None):
+        return call("engine.execute", {"command": command, "params": params or {}})
+
+    main = call("ui.inspect")["session"]["active"]
+    doc = run("document.inspect", {"document": main})
+    gray = doc["channels"]["composite"] == "Gray"
+    named = [l for _, l in walk(doc["layers"]) if l.get("name") == layer or str(l.get("id")) == str(layer)]
+    if len(named) != 1:
+        sys.exit(f"error: {len(named)} layers match {layer!r} in {doc['name']}; give its id or a unique name")
+    target = named[0]
+    if target.get("hasMask"):
+        run("layer.layerMask.delete", {"layer": target["id"]})
+    call("app.open", {"path": os.path.abspath(png)})
+    src = call("ui.inspect")["session"]["active"]
+    sdoc = run("document.inspect", {"document": src})
+    if gray and sdoc["channels"]["composite"] != "Gray":
+        run("image.mode.grayscale", {"profile": "sgray"})
+    run("document.activate", {"document": main})
+    tmp = run("layer.copyToDocument", {"document": main, "source": src, "layers": [sdoc["layers"][0]["id"]],
+                                       "at": center})["layers"][0]
+    run("file.close", {"document": src})
+    run("document.activate", {"document": main})
+    run("select.loadSelection", {"channel": "gray" if gray else "red", "layer": tmp})
+    run("layer.delete", {"layer": tmp})
+    run("layer.layerMask.revealSelection", {"layer": target["id"]})
+    c.call("engine.execute", {"command": "select.deselect", "params": {}})
+    return target["id"], bool(target.get("hasMask"))
+
+
 def verify(c, spec, base):
     """Render the document, crop it like the planner did and compare with its preview: mean |difference| and the
     signed bias per channel. A bias of a few levels where colour layers act means a colour conversion on import.
@@ -190,7 +239,7 @@ def verify(c, spec, base):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("spec", help="layers.json from a planning script")
     ap.add_argument("--above", type=int, help="layer id to stack the new layers above (default: the top layer)")
     ap.add_argument("--group", help="group name (default: the spec's; '' for no group)")
@@ -214,12 +263,28 @@ def main():
     made, grp = build(c, spec, base, a.above, a.group)
     if "preview" in spec and "crop" in spec and not a.no_verify:
         verify(c, spec, base)
+    result = {"group": grp, "layers": made}
     if a.file:
-        r = c.call("doc.save", {"path": os.path.abspath(os.path.expanduser(a.out))})
+        out = os.path.abspath(os.path.expanduser(a.out))
+        r = c.call("doc.save", {"path": out})
         if not r.get("ok"):
             sys.exit(f"error: cannot save {a.out}: {r.get('error')}")
         print(f"saved {a.out}")
-    print(json.dumps({"group": grp, "layers": made}))
+        # ids belong to a session: the next step on the saved file (pc.py script --open, import_layers --file) opens it
+        # in a new one, which numbers its layers afresh. Give the new layers' ids as such a session sees them, by name.
+        if os.path.splitext(out)[1].lower() in (".psd", ".psb", ".pcraft"):
+            fresh = pc.Headless()
+            if fresh.call("doc.open", {"path": out}).get("ok"):
+                names = {L.get("name", f"Layer {n + 1}") for n, L in enumerate(spec["layers"])}
+                names.add(spec.get("group") if a.group is None else a.group)
+                tree = fresh.call("engine.execute", {"command": "document.inspect", "params": {}}).get("result") or {}
+                ids = {}
+                for _, l in walk(tree.get("layers", [])):
+                    if l["name"] in names:
+                        ids.setdefault(l["name"], []).append(l["id"])
+                result["idsInSavedFile"] = {k: v[0] if len(v) == 1 else v for k, v in ids.items()}
+            fresh.close()
+    print(json.dumps(result))
     c.close()
 
 

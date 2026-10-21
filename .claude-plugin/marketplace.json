@@ -4,12 +4,12 @@
     "name": "Ivan",
     "url": "https://github.com/mendelabramzon"
   },
-  "description": "Unofficial Claude plugin for the PhotoCraft photo editor",
+  "description": "Unofficial Claude plugin for the PhotoCraft photo editor and the LightCraft photo library and raw developer",
   "plugins": [
     {
       "name": "photocraft",
       "source": "./",
-      "description": "Operate PhotoCraft: the live app on macOS, or headless in Claude app chats and on Linux. Batch editing and professional retouching workflows (skin, eyes and teeth, colour, cutouts, removal, straightening, skies, restoration)"
+      "description": "Operate PhotoCraft and LightCraft: the live apps on macOS, or headless in Claude app chats and on Linux. Professional retouching with measured QC (skin, frequency separation, eyes and teeth, colour, cutouts and marketplace product shots, compositing, removal, straightening, skies, restoration), deliverables, raw development, culling and exports for web, social and print"
     }
   ]
 }

@@ -1,0 +1,9 @@
+{"group": "Check layers",
+ "layers": [
+  {"name": "Check: saturation", "adjustment": "channelMixer",
+   "params": {"red": [170, -59, -11, 0], "green": [-30, 141, -11, 0], "blue": [-30, -59, 189, 0]}, "visible": false},
+  {"name": "Check: luminance", "fill": "#808080", "blend": "Color", "visible": false},
+  {"name": "Check: solar", "adjustment": "curves",
+   "params": {"points": [[0, 0], [64, 255], [128, 0], [192, 255], [255, 0]]}, "blend": "Luminosity", "visible": false},
+  {"name": "Check: negative", "adjustment": "invert", "params": {}, "visible": false}
+ ]}

@@ -39,11 +39,15 @@ truth about converging verticals"); numbers from tests with this script.
   building squat: for facades shot 8°, 12° and 20° off level, an eyeballed keystone made them 7, 11 and 21 % too
   short. Turning a virtual camera level with the photo's own focal length (K R K⁻¹, what a shift lens does
   optically) keeps windows square: 0 % error with the EXIF focal length. At 12° of pitch, assuming 20 or 50 mm for a
-  28 mm photo errs by -1 or +5 %, and never leaves the verticals converging.
+  28 mm photo errs by -1 or +5 %, and never leaves the verticals converging. This is also why the vertical stretch
+  practitioners add after Photoshop's Lens Correction (102–106 %, so a strongly corrected building doesn't look
+  stubby; Adobe Community) isn't needed here: that stretch patches the squeeze, and the camera model has none.
 - **Not always 100 %.** On tall buildings shot from the ground many photographers keep a little convergence so the
   building soars instead of looming (practitioners in Light Stalking's discussion), and full automatic modes can
   over-correct (The Photo Ephemeris). The script corrects pitch fully up to 10° and eases to 85 % at 20°; roll is
-  always fixed fully.
+  always fixed fully. An opt-in rule of thumb from a photographers' forum (Photrio; lore, not a standard): correct
+  fully while the top of the building is up to about 40° above level, keep some convergence beyond (see "Soaring or
+  looming" below).
 - **Deliberate tilt is not a mistake** (Photography Life). A steep upward shot, a Dutch angle or an abstract view of
   a tower stays as it is, or gets only its roll fixed.
 - **Keep the composition and the aspect ratio.** The correction costs pixels at the edges. Crop to the largest
@@ -103,6 +107,17 @@ Options worth knowing:
   rectangle anywhere, which can push the subject out on a steep correction.
 - `--distortion 15`: run filter.lensCorrection first (positive = barrel); see Tuning.
 
+### Soaring or looming: how much convergence to keep
+
+How steeply the viewer looks up at the top of the building decides it, not the pitch alone. From the output:
+`f = focal35 × √(W² + H²) / 43.27` px (W, H = `size`), and the top of the building at row `y_top` of the photo (read
+it off `grid.py`) sits `|pitch| + atan((H / 2 − y_top) / f)` degrees above level. A library facade on the bench, shot
+at 28 mm (`focal35` 28.2, 4288 × 3216, so f = 3493 px) with 8.0° of pitch, had its gable top at row 840, 768 px above the centre:
+8.0 + 12.4 = 20° up, so full correction (the auto amount, 1.0). Above about 40°, keep some convergence on purpose: `--amount
+0.85` to `0.9` leaves a building that soars; a shot steeper than 25° of pitch is left alone unless forced
+(`--mode verticals --amount 0.7`). It is a style choice the user may override: magazine architecture is usually
+corrected fully.
+
 ## Step 2: apply
 
 Live: select the photo layer, then run the steps:
@@ -159,6 +174,7 @@ same-aspect rectangle (rotation only).
 | Building looks squat or stretched after correction | Wrong focal length (no EXIF, or the photo was cropped) | `--focal` with the 35 mm-equivalent value |
 | Top of the building cut off | `--crop max` on a steep correction | Default `--crop centre`, or `--aspect free` |
 | `kept` below ~0.7 | Strong pitch on a wide lens | `--amount 0.8`, `--aspect free`; for the next shoot, step back or shoot wider |
+| A tall building looms, as if leaning back over the viewer | Full correction with its top more than ~40° above level | `--amount 0.85`–`0.9` ("Soaring or looming") |
 | Back wall or facade horizontals still slope in a frontal shot | The camera wasn't square to the wall (yaw) | Two `--level` lines on that wall |
 | Only one layer moved; the rest stayed tilted | `edit.transform` moves the active layer only | Straighten the flat photo first, or convert all layers to one smart object |
 | White wedges in the corners after a rotation | A crop box reaching outside the photo (image.crop fills it with the background colour) | Use the script's crop, which always stays inside |

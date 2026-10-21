@@ -41,8 +41,8 @@ def _decode(path):
                 line[x] = (line[x] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
         out[y * stride:(y + 1) * stride] = line
         prev = line
-    if depth == 16:
-        out = bytearray((out[k] * 256 + out[k + 1]) * 255 // 65535 for k in range(0, len(out), 2))
+    if depth == 16:  # to the nearest 8-bit level: rounding down read every 16-bit render half a level dark
+        out = bytearray(((out[k] * 256 + out[k + 1]) * 255 + 32767) // 65535 for k in range(0, len(out), 2))
     return w, h, nch, out
 
 

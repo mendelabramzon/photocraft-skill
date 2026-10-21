@@ -510,7 +510,7 @@ def solve(a, out, meta):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("photo"); ap.add_argument("outdir")
     ap.add_argument("--threshold", type=float, default=50, help="select.sky threshold (higher = stricter)")
     ap.add_argument("--softness", type=float, default=50, help="select.sky edge softness")

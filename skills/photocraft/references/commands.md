@@ -18,8 +18,8 @@ Every `layer.newAdjustmentLayer.X` has a destructive twin `image.adjustments.X` 
 params, applied to the active pixel layer.
 
 ## Contents
-- Document & canvas · Layers · Adjustments · Selections & masks · Filters · Retouching tools
-- Type · Shapes & painting · Layer styles · Transform · Export
+- Document & canvas · Layers · Adjustments · Selections & masks · Channels and Apply Image · Filters
+- Retouching tools · Type · Shapes & painting · Layer styles · Transform · Export
 
 ## Document & canvas
 
@@ -47,6 +47,11 @@ params, applied to the active pixel layer.
   `{"profile":"<builtin id>|working|/path/to/profile.icc"=working,"intent":"perceptual|relative|saturation|absolute"="relative","bpc":bool=true}`
 - `image.mode.bits16` — 16 Bits/Channel
   `{}`
+  Also `image.mode.bits8` and `image.mode.bits32`. A 16-bit document saves a 16-bit PNG (the planners' PNG
+  reader takes it); JPEG is always 8-bit.
+- `image.mode.lab` — Lab Color
+  `{"profile":"<builtin id>|working|/path/to/profile.icc"=working,"intent":"perceptual|relative|saturation|absolute"="relative","bpc":bool=true}`
+  Curves and Levels then take `lightness`, `a` and `b` channel keys.
 - `document.inspect` — Inspect Document
   `{"document":index?}`
 - `document.pixel` — Read Composite Pixel
@@ -66,6 +71,9 @@ params, applied to the active pixel layer.
   `{"profile":"working|srgb|display-p3|adobe-rgb-compat|prophoto-compat|linear-srgb|rec2020|gray-gamma-2.2|sgray|lab-d50|coated-cmyk|none" (or a path to an .icc file)}`
 - `edit.convertToProfile` — Convert to Profile…
   `{"profile":"srgb|display-p3|adobe-rgb-compat|prophoto-compat|linear-srgb|rec2020|gray-gamma-2.2|sgray|lab-d50|coated-cmyk|working" (or a path to an .icc file),"intent":"perceptual|relative|saturation|absolute"="relative","bpc":bool=true}`
+- `view.gamutWarning` — Gamut Warning
+  `{"on":bool=toggle,"threshold":deltaE=4,"profile":"<proof profile override>"}`
+  With a builtin id (`srgb`, `display-p3`, `adobe-rgb-compat`, `coated-cmyk`, …) it answers `{"fraction", "outOfGamut", "threshold", "profile"}`: the share of pixels more than ΔE 4 outside that profile (a saturated Display P3 photo: 0.289 against srgb), headless too. An .icc path, and `view.proofSetup` with a profile, are refused in automation ("uses ambient filesystem paths"); the preset `view.proofSetup.workingCmyPlate` and `view.proofColors {"on": true}` run.
 - `edit.undo` — Undo
   `{}`
 - `edit.redo` — Redo
@@ -79,8 +87,19 @@ params, applied to the active pixel layer.
   `{"layer":id,"mode":"replace|toggle|range|add"="replace"} (toggle = ⌘-click, range = ⇧-click)`
 - `layer.setProps` — Layer Properties
   `{"layer":id?,"name":str?,"visible":bool?,"opacity":0..1?,"fill":0..1?,"blend":"Multiply|…"?,"clipped":bool?,"locked":bool?,"locks":{"transparency","pixels","position","artboard","all":bool}?,"channels":[bool,…]? (Advanced Blending: which colour channels blend, R G B / C M Y K / L a b)}`
+  `blend` takes Photoshop's names: "Normal", "Multiply", "Screen", "Overlay", "Soft Light", "Hard Light",
+  "Linear Light", "Vivid Light", "Pin Light", "Lighten", "Darken", "Color Dodge", "Color Burn",
+  "Linear Dodge (Add)", "Linear Burn", "Subtract", "Divide", "Difference", "Exclusion", "Hue", "Saturation",
+  "Color", "Luminosity". Each renders exactly as `imgops.blend` predicts (checked on every 8-bit pair; the
+  colour modes use the luminosity weights 0.3/0.59/0.11). Soft Light is Photoshop's classic formula, not the
+  W3C one. A clipped layer shows only where the layer below is visible: its pixels and its mask.
 - `layer.duplicate` — Duplicate Layer…
   `{"layer":id?,"inPlace":bool=false (artboards: keep the copy on the original instead of beside it)} (no layer: every selected layer)`
+  The copy lands directly above its source, not at the top. In `document.inspect`, `layers[0]` is the top layer.
+- `layer.moveTo` — Move Layers
+  `{"layer":id?| "layers":[id,…]?, "target":id,"position":"above|below|into"="above","copy":bool=false} (layers: one undoable move, document order preserved; copy: place duplicates there and leave the layers, as ⌥-dragging a Layers panel row)`
+- `layer.layerStyle.blendingOptions` — Blending Options (Blend If)
+  `{"layer":id?,"blend":"normal|multiply|…"?,"opacity":0..100?,"fillOpacity":0..100?,"blendIf":{"channel":"gray|red|green|blue|cyan|…"|index="gray","thisLayer":[black,white]|[blackLo,blackHi,whiteLo,whiteHi]?,"underlying":[…]?}|[{…},…]|null?,"channels":[bool,…]?,"knockout":"none|shallow|deep"?,"blendInteriorEffectsAsGroup":bool?,"blendClippedLayersAsGroup":bool?,"transparencyShapesLayer":bool?,"layerMaskHidesEffects":bool?,"vectorMaskHidesEffects":bool?} (Blend If values 0..255; split points fade; null resets)`
 - `layer.delete` — Delete Layer
   `{"layer":id?} (no layer: every selected layer)`
 - `layer.translate` — Move Layer
@@ -107,7 +126,7 @@ params, applied to the active pixel layer.
   `{"to":"auto|layers|selection|canvas"="auto"} (auto: the selection bounds with one layer and an active selection, else the selected layers' bounds)`
 - `layer.copyToDocument` — Copy Layers to Document
   `{"document":index (destination),"layers":[id,…]?=the source's selected layers,"source":index?=active,"center":bool=false (centre on the destination's canvas),"at":[x,y]? (centre the copies on this point),"offset":[dx,dy]?=[0,0] (from their place in the source)}`
-  A command (`$PC exec`); without at, offset or center the copy keeps its pixel position.
+  A command (`$PC exec`); without at, offset or center the copy keeps its pixel position. `at` centres the layer's visible (non-transparent) content, not its canvas: a PNG with transparent margins lands off by its content's offset from the centre (`import_layers.py` corrects for it from the layer's `bounds`).
 - `layer.stampVisible` — Stamp Visible
   `{} → {layer} (every visible layer merged into a new layer above the active one; the originals stay)`
   Merges everything visible into the new layer, wherever it sits in the stack.
@@ -134,6 +153,10 @@ params, applied to the active pixel layer.
 - `layer.newAdjustmentLayer.curves` — Curves…
   `{"points":json,"red":json,"green":json,"blue":json,"eyedropper":json} (curves as [[in,out],…] in 0..255, 2..19 points: points = composite; red/green/blue, gray, cyan/magenta/yellow/black or lightness/a/b per channel; eyedropper = the dialog's Set Black/Neutral Gray/White Point picker {"point":"black|gray|white","at":[x,y]} or {"point",…,"color":[r,g,b] 0..1}, RGB and Grayscale (no gray) only, applied over the given curves) + mask*`
   A natural cubic spline per curve, the end values held beyond the first and last point (`imgops.spline_lut`); within one layer the channel curves apply first, then the composite.
+  A PSD stores curve points as whole levels and Channel Mixer values as whole percent: fractional ones come back
+  rounded (a render moved up to 1 level for Curves, 2 for a mixer; 33.33 % x 3 reopened as 99 %, 1.3 levels darker).
+  `.pcraft` keeps them exactly; the planners write mixers in whole percent adding up to 100.
+  `lightness`/`a`/`b` keys in an RGB document make a live Lab-space Curves layer (an identity curve renders exactly). Saved as PSD and reopened, its a and b curves come back as green and blue RGB curves (up to 36 levels off): keep such a file as `.pcraft`.
 - `layer.newAdjustmentLayer.brightnessContrast` — Brightness/Contrast…
   `{"brightness":-150..150=0,"contrast":-50..100=0,"legacy":bool=false} + mask*`
 - `layer.newAdjustmentLayer.exposure` — Exposure…
@@ -150,6 +173,7 @@ params, applied to the active pixel layer.
   `{"filter":"warming85|warmingLBA|warming81|cooling80|coolingLBB|cooling82|red|orange|yellow|green|cyan|blue|violet|magenta|sepia|deepRed|deepBlue|deepEmerald|deepYellow|underwater","color":"#rrggbb","density":0..100=25,"preserveLuminosity":bool=true} + mask*`
 - `layer.newAdjustmentLayer.gradientMap` — Gradient Map…
   `{"stops":json,"reverse":bool=false,"dither":bool=false} (stops [[location 0..1, "#rrggbb"], …], 2..64) + mask*`
+  Maps by Rec.601 luma (0.299/0.587/0.114, not the blend modes' 0.3/0.59/0.11), interpolates linearly in 8-bit sRGB values between stops and holds the end colours beyond the first and last. A #808080 middle stop in Soft Light leaves the midtones alone (split toning).
 - `layer.newAdjustmentLayer.colorLookup` — Color Lookup…
   `{"lut":"none|warm|cool|tealOrange|bleachBypass|fadedFilm|dayForNight|monoContrast|crossProcess"="none","file":text,"interpolation":"trilinear|tetrahedral"="trilinear","dither":bool=false,"data":json} (file: .cube/.3dl/.look path; data: file text + "fileName") + mask*`
 - `image.adjustments.colorLookup.list` — List Color Lookup Looks
@@ -240,6 +264,28 @@ params, applied to the active pixel layer.
 - `edit.contentAwareFill` — Content-Aware Fill…
   `{"sampling":"auto|rectangular|custom","margin":px?,"area":[x,y,w,h]?,"channel":index|name?,"colorAdaptation":"default|none|high|veryHigh","rotationAdaptation":"none|low|medium|high|full","scale":bool=false,"mirror":bool=false,"output":"current|new|duplicate","seed":u64=1}`
 
+## Channels and Apply Image
+
+- `image.applyImage` — Apply Image…
+  `{"source":{"document":index?,"layer":id|"merged"="merged","channel":"composite"|"red|…"|index|"selection"|"transparency"|"mask"="composite","invert":bool=false},"blending":"normal|multiply|screen|overlay|softLight|hardLight|colorDodge|colorBurn|darken|lighten|difference|exclusion|linearBurn|linearDodge|add|subtract|…"="multiply","opacity":0..100=100,"scale":1..2=1,"offset":-255..255=0,"preserveTransparency":bool=false,"mask":{"document","layer","channel","invert"}?}`
+  Applies to the active layer. Frequency separation's texture layer, set to Linear Light over the blurred one:
+  16-bit (`image.mode.bits16` first) `{"source": {"layer": <Low>, "invert": true}, "blending": "add", "scale": 2,
+  "offset": 0}` reproduces the photo exactly (max 1 level, the final 8-bit rounding). 8-bit `"blending":
+  "subtract", "scale": 2` needs `"offset": 127` here: the textbook 128 lightens every pixel by 1-2 levels, and
+  127 leaves half the pixels exact and the rest 1 level darker (8 bits lose one bit).
+- `image.calculations` — Calculations…
+  `{"source1":{"document","layer","channel","invert"},"source2":{…},"blending":"multiply|…"="multiply","opacity":0..100=100,"scale":1..2=1,"offset":-255..255=0,"mask":{…}?,"result":"newChannel|newDocument|selection"="newChannel","name":str?}`
+- `channel.duplicate` — Duplicate Channel…
+  `{"channel":index|name|"red|…"|"composite"|"quickMask","name":str?,"document":index|"new"?=active,"invert":bool=false}`
+  The start of a channel mask (hair, glass): copy the channel with the most contrast (`"invert": true` when the
+  subject is darker than the backdrop), `channel.target` the copy, crush it with `image.adjustments.levels`
+  (which then edits only that channel), `channel.target {"channel": "composite"}`, and
+  `select.loadSelection {"channel": "<its name>"}` (verified).
+- `channel.target` — Target Channel
+  `{"channel":"composite"|"red|green|blue|…"|index|name="composite"}`
+- `channel.list` — List Channels
+  `{}`
+
 ## Filters
 
 - `filter.blur.gaussianBlur` — Gaussian Blur…
@@ -266,6 +312,11 @@ params, applied to the active pixel layer.
   The median wherever |pixel - median| > threshold; never over a whole photo, only through a mask.
 - `filter.other.highPass` — High Pass…
   `{"radius":0.1..1000=10}`
+- `filter.other.minimum` — Minimum… (and `filter.other.maximum`)
+  `{"radius":0.2..500=1,"preserve":"squareness|roundness"}`
+  On a mask (target it), Minimum chokes a cutout's edge in and Maximum spreads it.
+- `filter.blurGallery.fieldBlur` — Field Blur…
+  `{"blur":0..500=15,"centerX":0..1=0.5,"centerY":0..1=0.5,"pins":json}`
 - `filter.stylize.oilPaint` — Oil Paint…
   `{"stylization":0.1..10=4,"cleanliness":0..10=5,"scale":0.1..10=1,"bristleDetail":0..10=5,"lighting":bool=true,"angle":-180..180=-60,"shine":0..10=1}`
 - `filter.pixelate.mosaic` — Mosaic…
@@ -292,9 +343,11 @@ Work on an empty layer above the photo (or a duplicate). Steps planned by the sc
 - `paint.healingBrush` — Healing Brush
   `{"points":[[x,y,pressure?],…],"size":1..5000 px=tool size,"hardness":0..100=tool hardness,"opacity":1..100=100,"flow":1..100=100,"spacing":1..1000 (% of size)=Brush Settings spacing,"layer":id?=active,"target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target,"source":[sx,sy] | "offset":[dx,dy],"aligned":bool=true,"sampleLayer":"current|currentAndBelow|all"="current","mode":"normal|…"="normal" → {"damage","offset","aligned","nextSource"}}`
   Copies texture from source/offset and takes its tone from the dab's rim. On an empty layer pass "sampleLayer": "currentAndBelow" (with "current" it does nothing and still returns ok). A multi-point stroke heals dab by dab, with one offset: a parallel strip, the wire stroke.
+  "all" also samples visible adjustment layers above the target: with a solar check layer showing, a heal came out 71 levels darker. Hide check layers before healing, or use "currentAndBelow". On frequency separation's High layer use "current": anything below reads the photo into a Linear Light layer (a spot 57-66 levels too light).
 - `paint.cloneStamp` — Clone Stamp
   `{"points":[[x,y,pressure?],…],"size":1..5000 px=tool size,"hardness":0..100=tool hardness,"opacity":1..100=100,"flow":1..100=100,"spacing":1..1000 (% of size)=Brush Settings spacing,"layer":id?=active,"target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target,"source":[sx,sy] (sampled under the first point) | "offset":[dx,dy],"aligned":bool=true,"sampleLayer":"current|currentAndBelow|all"="current","mode":"normal|multiply|…"="normal" → {"damage","offset","aligned","nextSource"}}`
-  For edges and structure, where healing smears: hardness 60-90, offset along the edge.
+  For edges and structure, where healing smears: hardness 60-90, offset along the edge. Offsets are whole pixels
+  (`[10.5, 3.25]` runs, and comes back, as `[11, 3]`).
 - `paint.patch` — Patch
   `{"offset":[dx,dy] (how far the selection was dragged),"mode":"source|destination"="source","contentAware":bool=false (fill the selection content-aware from the dragged-to place; a background job),"structure":1..7=4 (content-aware: 3..7 copy the middle exactly, 1..2 re-synthesise more of it),"color":0..10=0 (content-aware: how far the copy's level adapts to the selection's surroundings),"sampleAllLayers":bool=false (content-aware),"layer":id?=active,"target":"pixels"|"mask"|"quickMask"|{"channel":i}=Channels panel target} → {"damage","offset"}`
   From a selection: offset points at a donor on the same plane and light; content-aware patch and fill smeared high-key areas in 0.7.0.

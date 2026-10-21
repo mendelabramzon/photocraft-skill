@@ -95,7 +95,7 @@ def gradient_att(img, w, h, edge):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("crop"); ap.add_argument("ox", type=int); ap.add_argument("oy", type=int)
     ap.add_argument("area"); ap.add_argument("outdir")
     ap.add_argument("--sigma", type=float, default=12, help="reference scale in px (~2-3%% of face width); blotches up to ~2.5x this get evened")

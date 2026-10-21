@@ -16,14 +16,22 @@ through the same few points overshoots between them by up to 30 levels), written
   color_check.py measure IMAGE [--neutral X,Y[,R] ...] [--skin AREA] [--viz viz.png] [--scope scope.png]
   color_check.py correct IMAGE OUTDIR --neutral X,Y[,R] ... [--black X,Y[,R]] [--amount 1] [--tone] [--area AREA]
   color_check.py match   IMAGE REFERENCE OUTDIR [--amount 1] [--area AREA --ref-area AREA] [--skin S --ref-skin S --anchor-skin]
+  color_check.py clarity IMAGE OUTDIR [--skin AREA] [--method highpass|usm] [--radius PX] [--opacity 0.5]
+  color_check.py chart   IMAGE OUTDIR --corners X,Y X,Y X,Y X,Y [--skin AREA] [--area AREA] [--fit lab|hue|none]
   color_check.py compare BEFORE AFTER [--neutral X,Y[,R] ...] [--skin AREA]
 
 IMAGE: anything photocraft-cli reads: a `pc.py export` of the document as it is now, the original JPEG, a PSD.
 Big images are measured on a copy the CLI scales to --max-side (1200 px); every coordinate is in the full image's
 pixels, and neutral patches (radius R, default 8 px) are sampled from the full image. AREA: an area.json
 ({"skin": polygon(s), "exclude": [...]}, full-image coordinates) or a rectangle x0,y0,x1,y1.
-correct and match write OUTDIR/layers.json for import_layers.py, with a full-resolution crop's predicted result
-(preview.png) so the import verifies itself, and before_after.png / match.png to look at.
+correct, match, clarity and chart write OUTDIR/layers.json for import_layers.py, with a full-resolution crop's
+predicted result (preview.png) so the import verifies itself, and before_after.png / match.png / chart.png to look at.
+Curve points are whole levels and mixer weights whole percents: what a PSD keeps, so a saved file renders as predicted.
+chart measures an X-Rite ColorChecker Classic (corner patch centres given) against X-Rite's values by CIEDE2000 and
+fits a Channel Mixer for the colour a camera's rendering turned (curves can't move that), optionally masked to skin.
+correct --tone takes its end points from --for screen (4/251) or print (8/244). A --white or --black reference with
+one clipped channel is kept: that channel's curve end takes it to grey, as the Curves eyedroppers do.
+measure, correct, match and compare report skin by vectorscope angle and by Lab on its lit midtone (Margulis's rules).
 """
 import argparse
 import atexit
@@ -115,16 +123,28 @@ def point(s):
     return v[0], v[1], (v[2] if len(v) > 2 else 8.0)
 
 
-def sample(img, p):
-    """Mean colour of a disk at full resolution, ignoring specks > 3 MADs off its median luminance.
-    Returns (rgb, fraction of clipped pixels, pixels used)."""
+def patch(img, p):
+    """The full-resolution pixels of the disk p = (x, y, radius), as (r, g, b) tuples."""
     x, y, r = p
     x0, y0 = max(0, int(x - r)), max(0, int(y - r))
     x1, y1 = min(img.W, int(x + r) + 1), min(img.H, int(y + r) + 1)
     if x1 <= x0 or y1 <= y0:
         sys.exit(f"error: point {x:g},{y:g} is outside the image ({img.W}x{img.H})")
     w, h, R, G, B = img.crop(x0, y0, x1 - x0, y1 - y0)
-    pix = [(R[i], G[i], B[i]) for i in range(w * h) if (x0 + i % w - x) ** 2 + (y0 + i // w - y) ** 2 <= r * r]
+    return [(R[i], G[i], B[i]) for i in range(w * h) if (x0 + i % w - x) ** 2 + (y0 + i // w - y) ** 2 <= r * r]
+
+
+def clipped_by_channel(pix):
+    """Per channel, the share of the patch at 254 or more and at 1 or less: (high, low)."""
+    n = len(pix)
+    return ([sum(1 for q in pix if q[c] >= 254) / n for c in range(3)],
+            [sum(1 for q in pix if q[c] <= 1) / n for c in range(3)])
+
+
+def sample(img, p, pix=None):
+    """Mean colour of a disk at full resolution, ignoring specks > 3 MADs off its median luminance.
+    Returns (rgb, fraction of clipped pixels, pixels used). pix: the disk's pixels if already read (patch())."""
+    pix = pix or patch(img, p)
     Y = sorted(lum(*q) for q in pix)
     med = Y[len(Y) // 2]
     mad = max(0.5, sorted(abs(v - med) for v in Y)[len(Y) // 2])
@@ -268,8 +288,35 @@ def area_mask(spec, w, h, s):
     return imgops.raster({"skin": [[[x / s, y / s] for x, y in p] for p in polys], "exclude": ex}, 0, 0, w, h)
 
 
+def skin_lab_notes(a, b):
+    """Margulis's Lab rules for skin (Dehancer's "Lifelike", ch. 16): a face is positive in both a* and b*, typically
+    15-20 each in a midtone; under ~10 reads pale or grey, over 30 oversaturated; b* a little above a* reads healthy,
+    a* above b* red or "burned" (normal for babies, the elderly, redheads). Starting points, not targets: on eight
+    well-balanced portraits the lit midtone read a* 6-28, b* 7-38, b*/a* 0.62-1.37, and each outlier had its reason in
+    the light or the complexion (high-key studio light, low sun, a ruddy face). Returns the notes that apply."""
+    if a <= 2 or b <= 2:
+        return ["a* or b* near zero or negative: skin isn't red-yellow here, so a cast (green, blue or magenta) or a "
+                "coloured light; correct from neutrals first"]
+    notes = []
+    if max(a, b) < 10:
+        notes.append("pale: a* and b* under 10 (fair skin in soft, bright light measures this way: a high-key studio "
+                     "portrait balanced on a chart read a* 6, b* 7; a cool or grey cast does too, so check a neutral)")
+    if max(a, b) > 30:
+        notes.append("oversaturated: a* or b* over 30 (low warm sun raises it: golden-hour skin read b* 28-38; otherwise "
+                     "Vibrance down or a Hue/Saturation on reds and yellows)")
+    if b < 0.8 * a:
+        notes.append("b* well below a*: reads red or pink ('burned'), usual for babies, the elderly, redheads and "
+                     "flushed or ruddy skin; otherwise a magenta cast or a red-heavy grade")
+    elif b > 1.5 * a:
+        notes.append("b* well above a*: reads yellow or sallow (a yellow or green cast, or a warm grade on top)")
+    return notes
+
+
 def skin_stats(R, G, B, mask, space):
-    """Median skin colour inside the mask: vectorscope angle (vs the skin-tone line), saturation, Lab."""
+    """Median skin colour inside the mask: vectorscope angle (vs the skin-tone line), saturation, Lab. Plus the same on
+    the lit midtone only (litMidtone: the 50th-90th percentile of the area's luminance, so the shadow side, hair and
+    brows below it and the speculars above it don't count): a skin average mixes in all of those, and a rough face
+    area read b*/a* 1.41 where its lit cheeks read 1.09; the lit midtone of that face read 1.22."""
     idx = [i for i in range(len(R)) if mask[i] and 25 < lum(R[i], G[i], B[i]) < 245 and max(R[i], G[i], B[i]) < 254]
     if len(idx) < 20:
         return {"error": "fewer than 20 usable skin pixels in the area"}
@@ -281,10 +328,22 @@ def skin_stats(R, G, B, mask, space):
     # measured: studio skin under a neutral chart 116, golden-hour skin 115, its skylit shadow side 110
     verdict = ("in the usual skin range (110-130)" if 110 <= ang <= 130 else "pinker/redder than usual skin" if 90 <= ang < 110
                else "yellower/greener than usual skin" if 130 < ang <= 150 else "far from any skin hue: a strong cast")
+    Ys = sorted(lum(R[i], G[i], B[i]) for i in idx)
+    lo, hi = Ys[len(Ys) // 2], Ys[int(0.9 * (len(Ys) - 1))]
+    lit = [i for i in idx if lo <= lum(R[i], G[i], B[i]) <= hi]
+    mt = [sorted(ch[i] for i in lit)[len(lit) // 2] for ch in (R, G, B)]
+    Lm, am, bm = lab(*mt, space)
+    notes = skin_lab_notes(am, bm)
     return {"pixels": len(idx), "rgb": med, "angle": round(ang, 1), "offLine": round(off, 1),
             "angleIQR": [round(angs[len(angs) // 4], 1), round(angs[3 * len(angs) // 4], 1)] if angs else None,
             "saturation": round(sat, 1), "lab": [round(L, 1), round(a, 1), round(b, 1)],
-            "hueAngleLab": round(math.degrees(math.atan2(b, a)), 1), "verdict": verdict}
+            "hueAngleLab": round(math.degrees(math.atan2(b, a)), 1), "verdict": verdict,
+            "litMidtone": {"pixels": len(lit), "luminance": [round(lo, 1), round(hi, 1)], "rgb": mt,
+                           "lab": [round(Lm, 1), round(am, 1), round(bm, 1)], "chroma": round(math.hypot(am, bm), 1),
+                           "bOverA": round(bm / am, 2) if am > 2 and bm > 2 else None,
+                           "angle": round(vectorscope(*mt)[0], 1),
+                           "labVerdict": "; ".join(notes) if notes else "typical (a*, b* positive, about 10-30, b* near or "
+                                                                          "a little above a*)"}}
 
 
 # ---------------------------------------------------------------- pictures: viz and vectorscope
@@ -401,8 +460,10 @@ def monotone(pts):
 
 
 def clean_points(pts, gap=6):
-    """Sort, merge inputs closer than `gap` levels (the ends at 0 and 255 win), and drop points until the spline is
-    monotone (an overshooting curve solarises). Returns (points, dropped)."""
+    """Sort, merge inputs closer than `gap` levels (the ends at 0 and 255 win), round to whole levels, and drop points
+    until the spline is monotone (an overshooting curve solarises). Whole levels because a PSD stores Curves points that
+    way (fractional ones reopened up to 1 level off), so the prediction is what every saved file keeps. Returns
+    (points, dropped)."""
     pts = sorted(pts)
     out = []
     for x, y in pts:
@@ -415,13 +476,22 @@ def clean_points(pts, gap=6):
             out[-1] = [(out[-1][0] + x) / 2, (out[-1][1] + y) / 2]
         else:
             out.append([x, y])
+    whole = []
+    for x, y in out:
+        x, y = round(x), round(min(255.0, max(0.0, y)))
+        if whole and x <= whole[-1][0]:  # two inputs on one level once rounded: keep one, the ends win
+            if whole[-1][0] not in (0, 255):
+                whole[-1] = [x, y] if x in (0, 255) else [x, round((whole[-1][1] + y) / 2)]
+            continue
+        whole.append([x, y])
+    out = whole
     dropped = 0
     while len(out) > 2 and not monotone(out):
         inner = range(1, len(out) - 1)
         k = min(inner, key=lambda i: min(out[i][0] - out[i - 1][0], out[i + 1][0] - out[i][0]))
         del out[k]
         dropped += 1
-    return [[round(x, 2), round(min(255.0, max(0.0, y)), 2)] for x, y in out], dropped
+    return out, dropped
 
 
 def is_identity(pts):
@@ -567,14 +637,20 @@ def cmd_measure(a):
 
 
 GRID = [0, 16, 32, 56, 80, 104, 128, 160, 192, 224, 255]
+# --tone end points by output. Screen: rich black and white with texture. Print: inside what paper and press hold, where
+# published targets agree only roughly (Kelby CC 2017 7/245, his CS2 book 20/244, Macworld 10/243, Curvemeister users
+# 10-15/245): shadows near 7-10, highlights near 243-245.
+TARGETS = {"screen": (4.0, 251.0), "print": (8.0, 244.0)}
 
 
-def wb_curve(pairs):
+def wb_curve(pairs, top=255.0, bottom=0.0):
     """One channel's white-balance curve through the (x -> t) pairs, ends at 0 and 255. Between the pairs it is
     piecewise power (straight lines in log-log): one pair gives a pure gamma curve, several never overshoot between
     them, where a natural spline through the same few points swings 30 levels past them (measured on a colour
     chart). A linear toe below a quarter of the darkest pair keeps the slope at black finite. Returned as enough
     points that PhotoCraft's spline follows it; the prediction uses those points, so it stays exact.
+    top / bottom: the output at input 255 / 0. A white reference clipped in this channel sets top (it is 255 there,
+    so only the end can take it to grey, as the Curves white eyedropper does); a black one clipped at 0 sets bottom.
     Returns (points, pairs dropped because they contradict the others)."""
     pts, dropped = [], 0
     for x, t in sorted(p for p in pairs if 4 <= p[0] <= 251):
@@ -582,15 +658,20 @@ def wb_curve(pairs):
             dropped += 1  # a brighter input can't map darker: these references disagree
             continue
         pts.append((x, min(max(t, 1.0), 254.0)))
-    if not pts:
-        return [[0, 0], [255, 255]], dropped
+    if top < 255:  # the end joins the power-law chain as its last point
+        while pts and pts[-1][1] >= top:
+            pts.pop()
+            dropped += 1
+        pts.append((255.0, top))
+    if not pts or pts == [(255.0, top)]:
+        return [[0, round(bottom)], [255, round(top)]], dropped
     U = [math.log(x / 255) for x, _ in pts]
     V = [math.log(t / 255) for _, t in pts]
 
     def F(x):
         u = math.log(x / 255)
         if u >= U[-1]:
-            return 255 * math.exp(V[-1] / U[-1] * u)
+            return 255 * math.exp(V[-1] / U[-1] * u) if U[-1] < 0 else 255 * math.exp(V[-1])
         for i in range(len(U) - 1, 0, -1):
             if u >= U[i - 1]:
                 return 255 * math.exp(V[i - 1] + (V[i] - V[i - 1]) / (U[i] - U[i - 1]) * (u - U[i - 1]))
@@ -598,62 +679,108 @@ def wb_curve(pairs):
         return 255 * math.exp(V[0] + g * (u - U[0]))
 
     toe = pts[0][0] / 4
-    xs = [x for x in GRID if all(abs(x - p[0]) >= 8 for p in pts)] + [p[0] for p in pts]
-    out = sorted([x, 0.0 if x == 0 else 255.0 if x == 255 else F(x) if x >= toe else F(toe) * x / toe] for x in xs)
+    inner = [p[0] for p in pts if p[0] < 255]
+    xs = [0, 255] + [x for x in GRID if 0 < x < 255 and all(abs(x - p) >= 8 for p in inner)] + inner
+    out = sorted([x, bottom if x == 0 else top if x == 255 else F(x) if x >= toe else bottom + (F(toe) - bottom) * x / toe]
+                 for x in xs)
     pts2, d = clean_points(out, gap=1)
     return pts2, dropped + d
 
 
 def solve_wb(refs, amount):
-    """Per-channel curves taking each reference to grey at its own luminance (or its given level), by `amount`."""
+    """Per-channel curves taking each reference to grey at its own luminance (or its given level), by `amount`.
+    refs: (rgb, level) or (rgb, level, ends), ends = {channel index: "top" | "bottom"} for a channel the reference
+    has clipped: that channel's curve end is placed so the reference still lands on its target, extrapolated from the
+    next reference's slope (a fully clipped patch puts the end on the target itself, like the Curves eyedroppers; a
+    partly clipped one, still mostly measured, keeps its own value: a patch 10 % clipped in blue ended b* +2.6 with the
+    end on the target and within 1 b* this way)."""
     curves, dropped = {}, 0
     for ci, name in enumerate(("red", "green", "blue")):
-        pairs = []
-        for rgb, level in refs:
+        pairs, clipped, top, bottom = [], [], 255.0, 0.0
+        for ref in refs:
+            rgb, level, ends = ref[0], ref[1], (ref[2] if len(ref) > 2 else {})
             t = lum(*rgb) if level is None else level
-            pairs.append((rgb[ci], rgb[ci] + amount * (t - rgb[ci])))
-        curves[name], d = wb_curve(pairs)
+            pr = (rgb[ci], rgb[ci] + amount * (t - rgb[ci]))
+            (clipped.append((ends[ci], pr)) if ends.get(ci) else pairs.append(pr))
+        srt = sorted(pairs)
+        for side, (x, y) in clipped:
+            if side == "top":
+                lower = [p for p in srt if p[0] < x - 3]
+                s = (y - lower[-1][1]) / (x - lower[-1][0]) if lower else y / max(x, 1.0)
+                top = min(255.0, max(y, y + s * (255 - x)))
+            else:
+                upper = [p for p in srt if p[0] > x + 3]
+                s = (upper[0][1] - y) / (upper[0][0] - x) if upper else (255 - y) / max(255 - x, 1.0)
+                bottom = max(0.0, min(y, y - s * x))
+        curves[name], d = wb_curve(pairs, top, bottom)
         dropped += d
     return curves, dropped
 
 
-def tone_curve(R, G, B, clip, black, white):
-    """A straight composite curve taking the darkest/lightest clip% of every channel to `black`/`white` (an end
-    already past its target stays put): Levels' black and white point, measured per channel so that no channel
-    clips more than clip% (luminance alone lets the red of warm highlights clip), speculars still free to reach 255."""
+def tone_curve(R, G, B, clip, black, white, both=False):
+    """A straight composite curve taking the darkest/lightest clip% of every channel to `black`/`white`: Levels'
+    black and white point, measured per channel so that no channel clips more than clip% (luminance alone lets the
+    red of warm highlights clip), speculars still free to reach 255. An end already past its target stays put (for a
+    screen: only ever stretch), unless both: then it is pulled in too (for print: the whole range inside the paper's)."""
     srt = [sorted(ch) for ch in (R, G, B)]
     n = len(R) - 1
     lo, hi = min(s[int(clip / 100 * n)] for s in srt), max(s[int((1 - clip / 100) * n)] for s in srt)
-    b_pt = (lo, black) if lo > black + 1 else (0.0, 0.0)
-    w_pt = (hi, white) if hi < white - 1 else (255.0, 255.0)
+    b_pt = (lo, black) if lo > black + 1 or (both and lo < black - 1) else (0.0, 0.0)
+    w_pt = (hi, white) if hi < white - 1 or (both and hi > white + 1) else (255.0, 255.0)
     if b_pt == (0.0, 0.0) and w_pt == (255.0, 255.0):
         return None, lo, hi
     m = (w_pt[1] - b_pt[1]) / (w_pt[0] - b_pt[0])
-    x0 = b_pt[0] - b_pt[1] / m if b_pt[0] else 0.0
-    x1 = w_pt[0] + (255 - w_pt[1]) / m if w_pt[0] != 255 else 255.0
-    return [[round(x0, 2), 0], [round(min(255.0, x1), 2), 255]], lo, hi
+    y0, y1 = b_pt[1] - m * b_pt[0], w_pt[1] + m * (255 - w_pt[0])  # the line's output at inputs 0 and 255
+    start = [0.0, y0] if y0 >= 0 else [-y0 / m, 0.0]
+    end = [255.0, y1] if y1 <= 255 else [w_pt[0] + (255 - w_pt[1]) / m, 255.0]
+    return [[round(start[0]), round(start[1])], [round(end[0]), round(end[1])]], lo, hi  # whole levels, as a PSD keeps
 
 
 def cmd_correct(a):
     img = Image(a.image, a.max_side)
     os.makedirs(a.outdir, exist_ok=True)
-    refs, report = [], []
+    refs, report, clash = [], [], []
+    names = ("red", "green", "blue")
     for kind, spec, level in ([("neutral", p, None) for p in a.neutral] + ([("white", a.white, a.white_level)] if a.white else [])
                               + ([("black", a.black, a.black_level)] if a.black else [])):
         p = point(spec)
-        rgb, clipped, n = sample(img, p)
+        pix = patch(img, p)
+        rgb, clipped, n = sample(img, p, pix)
+        ends = {}
         if clipped > 0.02:
-            print(f"warning: {kind} {spec}: {100 * clipped:.0f}% clipped, left out", file=sys.stderr)
-            continue
-        refs.append((rgb, level))
-        report.append({"kind": kind, "at": list(p), "before": describe(rgb, a.space)})
+            # A strong cast clips one channel of the whites (or the blacks) first. That channel is 255 (0) however bright
+            # (dark) the patch really is, so a point through it can't move it to grey; the end of its curve can, as the
+            # Curves white (black) eyedropper does. Only for --white / --black, and only when one channel is clipped.
+            hi, lo = clipped_by_channel(pix)
+            bad = [c for c in range(3) if hi[c] > 0.02 or lo[c] > 0.02]
+            side = "top" if kind == "white" else "bottom" if kind == "black" else None
+            if not (side and len(bad) == 1 and (hi if side == "top" else lo)[bad[0]] > 0.02
+                    and (lo if side == "top" else hi)[bad[0]] <= 0.02):
+                where = (f"clipped in {', '.join(names[c] for c in bad)}" if bad else
+                         "of its pixels have a clipped channel, spread over several channels (specks or a texture)")
+                print(f"warning: {kind} {spec}: {100 * clipped:.0f}% {where}, left out" + (
+                      " (a near-white or near-black neutral with one clipped channel still works as --white / --black)"
+                      if kind == "neutral" and len(bad) == 1 else "; sample a smoother patch nearby" if not bad else ""),
+                      file=sys.stderr)
+                continue
+            c = bad[0]
+            ends = {c: side}
+            t = lum(*rgb) if level is None else level
+            clash.append(f"{kind} {spec}: its {names[c]} channel is clipped in {100 * (hi if side == 'top' else lo)[c]:.0f}% of the "
+                         f"patch, so the {side} end of the {names[c]} curve takes it to its target ({t:.0f}), as the Curves {kind} "
+                         f"eyedropper would; {names[c]} detail {'brighter' if side == 'top' else 'darker'} than the patch can't come back")
+        refs.append((rgb, level, ends))
+        report.append({"kind": kind, "at": list(p), "before": describe(rgb, a.space)} |
+                      ({"clippedChannel": names[next(iter(ends))]} if ends else {}))
     if not refs:
         sys.exit("error: no usable reference")
-    clash = []
     for i in range(len(report)):
         for j in range(i + 1, len(report)):
             (L1, a1, b1), (L2, a2, b2) = report[i]["before"]["lab"], report[j]["before"]["lab"]
-            if abs(L1 - L2) < 10 and math.hypot(a1 - a2, b1 - b2) > 4:
+            # within 20 L* of white or black a cast changes fast with brightness (a tungsten preset read b* -18 at a
+            # chart's N8, L* 85, and -9 at its white, L* 93): there "the same level" is 5 L*, in the midtones 10
+            same = 10 if all(20 <= L <= 80 for L in (L1, L2)) else 5
+            if abs(L1 - L2) < same and math.hypot(a1 - a2, b1 - b2) > 4:
                 clash.append(f"references {i + 1} and {j + 1} are at about the same level but {math.hypot(a1 - a2, b1 - b2):.0f} "
                              "a*b* apart: one isn't neutral, or the light differs between them (--area for a second light)")
     curves, dropped = solve_wb(refs, a.amount)
@@ -665,14 +792,14 @@ def cmd_correct(a):
         masks = [imgops.gauss(m, img.w, img.h, a.feather / img.s / 2) if a.feather > 0 else m]
         mask = write_mask(img, masks[0], a.outdir)
         layers[0]["mask"] = "mask.png"
-    for r, (rgb, level) in zip(report, refs):
-        r["after"] = describe(through(rgb, luts), a.space)
+    for r, ref in zip(report, refs):
+        r["after"] = describe(through(ref[0], luts), a.space)
     big = max(abs(p[1] - p[0]) for c in curves.values() for p in c)
     out = {"image": img.name, "amount": a.amount, "references": report, "curves": curves}
     if len(refs) == 1:
         clash.append("one reference corrects its own brightness level; casts usually change with brightness (a camera's "
                      "tungsten preset measured b* -18 to -32 across a chart's greys): add a darker and a lighter neutral")
-    if any(max(rgb) > 235 for rgb, _ in refs) and not any(30 <= r["before"]["lab"][0] <= 75 for r in report):
+    if any(max(ref[0]) > 235 for ref in refs) and not any(30 <= r["before"]["lab"][0] <= 75 for r in report):
         clash.append("a reference has a channel above 235: near-white references bend the top of the curve hard and "
                      "leave other levels off; prefer neutrals in the midtones (L* 30-75)")
     if clash:
@@ -684,8 +811,10 @@ def cmd_correct(a):
                                 "check the result in smooth gradients")
     if a.tone:
         R2, G2, B2 = apply_luts(img.R, img.G, img.B, luts)
-        tc, lo, hi = tone_curve(R2, G2, B2, a.clip, a.black_target, a.white_target)
-        out["tone"] = {"darkest": round(lo, 1), "lightest": round(hi, 1), "curve": tc}
+        bt, wt = (TARGETS[a.output][0] if a.black_target is None else a.black_target,
+                  TARGETS[a.output][1] if a.white_target is None else a.white_target)
+        tc, lo, hi = tone_curve(R2, G2, B2, a.clip, bt, wt, both=a.output == "print")
+        out["tone"] = {"for": a.output, "targets": [bt, wt], "darkest": round(lo, 1), "lightest": round(hi, 1), "curve": tc}
         if tc:
             luts.append({"points": imgops.spline_lut(tc)})
             masks.append(None)
@@ -798,6 +927,464 @@ def cmd_match(a):
     print(json.dumps(out))
 
 
+def local_contrast(R, G, B, w, h, sigma, mask=None):
+    """Mean |luminance - its Gaussian blur at sigma px| (where mask > 0.5): what clarity raises."""
+    L = [lum(r, g, b) for r, g, b in zip(R, G, B)]
+    m = imgops.gauss(L, w, h, sigma)
+    d = [abs(p - q) for i, (p, q) in enumerate(zip(L, m)) if mask is None or mask[i] > 0.5]
+    return sum(d) / max(1, len(d))
+
+
+def verify_window(img, change, off=None, at=None, size=512):
+    """Top-left (full-image pixels) of the verify crop for a planner's preview: where the layer changes most (change:
+    per analysis pixel), and with a mask across its edge, so the import check sees the mask too: at least a tenth of the
+    window where the mask turns the layer off (off: 1 there), or half the most any window holds for small areas, and at
+    most nine tenths. A window where the mask turns the layer off would match the preview whatever the import did.
+    at: X,Y to centre it there instead."""
+    cw, ch = min(size, img.W), min(size, img.H)
+    if at:
+        x, y = point(at)[:2]
+        return int(min(max(0, x - cw / 2), img.W - cw)), int(min(max(0, y - ch / 2), img.H - ch))
+    ww, wh = max(1, min(img.w, round(cw / img.s))), max(1, min(img.h, round(ch / img.s)))
+    change_in = window_sums(change, img.w, img.h)
+    off_in = window_sums(off, img.w, img.h) if off else None
+    cands = []
+    for by in sorted(set(list(range(0, img.h - wh + 1, max(1, wh // 4))) + [img.h - wh])):
+        for bx in sorted(set(list(range(0, img.w - ww + 1, max(1, ww // 4))) + [img.w - ww])):
+            share = off_in(bx, by, bx + ww, by + wh) / (ww * wh) if off_in else 0.0
+            cands.append((change_in(bx, by, bx + ww, by + wh), share, bx, by))
+    least = min(0.1, 0.5 * max(c[1] for c in cands))
+    best = max((c for c in cands if least <= c[1] <= 0.9), default=None) if least > 0 else None
+    best = best or max(cands)
+    return int(min(best[2] * img.s, img.W - cw)), int(min(best[3] * img.s, img.H - ch))
+
+
+CLARITY_BLENDS = {"highpass": ("Overlay", "Soft Light", "Hard Light", "Linear Light"), "usm": ("Normal", "Luminosity")}
+
+
+def window_sums(vals, w, h):
+    """A summed-area table (a zero row and column first) and the sum over x0 <= x < x1, y0 <= y < y1 from it."""
+    W = w + 1
+    S = [0.0] * (W * (h + 1))
+    for y in range(h):
+        acc = 0.0
+        for x in range(w):
+            acc += vals[y * w + x]
+            S[(y + 1) * W + x + 1] = S[y * W + x + 1] + acc
+    return lambda x0, y0, x1, y1: S[y1 * W + x1] - S[y0 * W + x1] - S[y1 * W + x0] + S[y0 * W + x0]
+
+
+def cmd_clarity(a):
+    """Local contrast ("clarity") on a Stamp Visible layer, masked off skin, with an exact preview."""
+    hp = a.method == "highpass"
+    blend = a.blend or ("Overlay" if hp else "Normal")
+    if blend not in CLARITY_BLENDS[a.method]:
+        sys.exit(f"error: --blend {blend} with --method {a.method}: " + (
+            "a High Pass layer is mid grey plus the detail, so it needs a contrast blend: " if hp else
+            "an Unsharp Mask stamp is the photo itself, sharpened: ") + " or ".join(CLARITY_BLENDS[a.method]) +
+            (" (Luminosity keeps the colours as they were)" if not hp else ""))
+    img = Image(a.image, a.max_side)
+    os.makedirs(a.outdir, exist_ok=True)
+    long_ = max(img.W, img.H)
+    radius = a.radius or round((0.03 if hp else 0.015) * long_, 1)
+    if hp:  # KelbyOne: High Pass at about 180 px on a 6000 px photo, Overlay or Soft Light on a copy
+        cmds = [["filter.other.highPass", {"radius": radius}]] + ([] if a.colour else [["image.adjustments.desaturate", {}]])
+        opacity = 0.5 if a.opacity is None else a.opacity
+    else:  # KelbyOne: Unsharp Mask amount 5-30 %, radius 30-100 px, threshold 0
+        cmds = [["filter.sharpen.unsharpMask", {"amount": a.amount, "radius": radius, "threshold": 0}]]
+        opacity = 1.0 if a.opacity is None else a.opacity
+    layer = {"name": a.name, "stamp": cmds}
+    if blend != "Normal":
+        layer["blend"] = blend
+    if opacity < 1:
+        layer["opacity"] = opacity
+    warnings = []
+    notskin, mask = None, None
+    if a.skin:  # clarity amplifies pores, blemishes and the shadows of wrinkles: keep it off skin
+        sk = area_mask(a.skin, img.w, img.h, img.s)
+        if a.feather > 0:
+            sk = imgops.gauss(sk, img.w, img.h, a.feather / img.s / 2)
+        notskin = [1.0 - v for v in sk]
+        if max(notskin) <= 0.5 / 255:
+            sys.exit("error: the --skin area covers the whole photo, so nothing would get local contrast; draw it round "
+                     "the visible skin only (face, neck, hands)")
+        mask = write_mask(img, notskin, a.outdir)
+        layer["mask"] = "mask.png"
+    else:
+        warnings.append("no --skin: faces get the local contrast too, which deepens pores, blemishes and wrinkles; for "
+                        "portraits pass the skin area")
+
+    def filtered(src, x, y, w, h, r):
+        """The filter's output for the window (x, y, w, h) of src, run on the window plus 3 radii (exact inside)."""
+        W, H = full_size(src)
+        m = int(3 * r) + 8
+        cx0, cy0 = max(0, x - m), max(0, y - m)
+        cx1, cy1 = min(W, x + w + m), min(H, y + h + m)
+        steps = [("image.crop", {"x": cx0, "y": cy0, "width": cx1 - cx0, "height": cy1 - cy0})]
+        for c, p in cmds:
+            steps.append((c, dict(p, radius=r) if "radius" in p else p))
+        steps.append(("image.crop", {"x": x - cx0, "y": y - cy0, "width": w, "height": h}))
+        out = tmp("f.png")
+        cli_run(src, steps, out)
+        return imgops.load(out)[2:]
+
+    key = imgops.blend_key(blend)
+    f = imgops.SEPARABLE.get(key)  # Normal and the contrast blends work channel by channel; Luminosity doesn't
+
+    def compose(R, G, B, F, M):
+        if f is None:
+            out = [[], [], []]
+            for i in range(len(R)):
+                k = opacity * (M[i] if M is not None else 1.0)
+                v = imgops.blend(blend, (R[i], G[i], B[i]), (F[0][i], F[1][i], F[2][i]), k) if k > 0 else (R[i], G[i], B[i])
+                for c in range(3):
+                    out[c].append(v[c])
+            return out
+        out = []
+        for ch, fc in zip((R, G, B), F):
+            o = []
+            for i, (b, s) in enumerate(zip(ch, fc)):
+                k = opacity * (M[i] if M is not None else 1.0)
+                o.append(b + k * (255 * min(1.0, max(0.0, f(b / 255, s / 255))) - b) if k > 0 else b)
+            out.append(o)
+        return out
+
+    # the whole photo on the analysis copy (radius scaled): local contrast, clipping, where the layer changes most
+    small = tmp("s.png")
+    imgops.save_rgb(small, img.w, img.h, img.R, img.G, img.B)
+    Fs = filtered(small, 0, 0, img.w, img.h, round(radius / img.s, 2))
+    R2, G2, B2 = compose(img.R, img.G, img.B, Fs, notskin)
+
+    cw, ch = min(512, img.W), min(512, img.H)
+    change = [abs(R2[i] - img.R[i]) + abs(G2[i] - img.G[i]) + abs(B2[i] - img.B[i]) for i in range(len(R2))]
+    x0, y0 = verify_window(img, change, [1.0 if v < 0.5 else 0.0 for v in notskin] if notskin else None, a.at)
+    # exact preview: a full-resolution window, filtered by the CLI with enough margin, blended as PhotoCraft does
+    w, h, R, G, B = img.crop(x0, y0, cw, ch)
+    Mw = mask[1](x0, y0, cw, ch) if mask else None
+    P = compose(R, G, B, filtered(img.path, x0, y0, cw, ch, radius), Mw)
+    imgops.save_rgb(os.path.join(a.outdir, "preview.png"), w, h, *P)
+    changed = sum(abs(P[c][i] - v) for c, chan in enumerate((R, G, B)) for i, v in enumerate(chan)) / (3 * w * h)
+    skin_share = sum(1 for v in Mw if v < 0.5) / (w * h) if Mw else 0.0
+    if changed < 0.5:
+        warnings.append(f"the verify window changes only {changed:.2f} levels on average: the import check proves little; "
+                        "pick a window with --at X,Y where the layer acts")
+    center = [mask[0][0] + mask[0][2] / 2, mask[0][1] + mask[0][3] / 2] if mask else [img.W / 2, img.H / 2]
+    json.dump({"center": center, "crop": [x0, y0, cw, ch], "preview": "preview.png", "group": a.group, "layers": [layer]},
+              open(os.path.join(a.outdir, "layers.json"), "w"), indent=1)
+
+    sig = 0.01 * max(img.w, img.h)
+    lc0, lc1 = (local_contrast(*c, img.w, img.h, sig, notskin) for c in ((img.R, img.G, img.B), (R2, G2, B2)))
+    out = {"image": img.name, "method": a.method, "radius": radius, "blend": blend, "opacity": opacity,
+           "commands": cmds, "localContrast": {"before": round(lc0, 2), "after": round(lc1, 2),
+                                               "change%": round(100 * (lc1 / max(1e-6, lc0) - 1), 1)},
+           "verifyWindow": {"crop": [x0, y0, cw, ch], "meanChange": round(changed, 2), "skinShare": round(skin_share, 3)},
+           "before": tone_stats(img.R, img.G, img.B), "after": tone_stats(R2, G2, B2)}
+    if notskin:
+        sk_m = [1 - v for v in notskin]
+        out["skinLocalContrast"] = {"before": round(local_contrast(img.R, img.G, img.B, img.w, img.h, sig, sk_m), 2),
+                                    "after": round(local_contrast(R2, G2, B2, img.w, img.h, sig, sk_m), 2)}
+    for c in "RGB":
+        if out["after"]["clippedHigh%"][c] > out["before"]["clippedHigh%"][c] + 0.3 or \
+                out["after"]["clippedLow%"][c] > out["before"]["clippedLow%"][c] + 0.3:
+            warnings.append(f"{c} clips more than 0.3 % more of the photo: lower the opacity (or the amount)")
+            break
+    out["warnings"] = warnings
+    k = max(1, math.ceil(img.w / 700))
+    sw, sh = img.w // k, img.h // k
+    halves = [[imgops.downscale(c, img.w, img.h, k)[0] for c in chans] for chans in ((img.R, img.G, img.B), (R2, G2, B2))]
+    px = [[255, 255, 255] for _ in range((2 * sw + 8) * sh)]
+    for y in range(sh):
+        for x in range(sw):
+            i = y * sw + x
+            px[y * (2 * sw + 8) + x] = [c[i] for c in halves[0]]
+            px[y * (2 * sw + 8) + sw + 8 + x] = [c[i] for c in halves[1]]
+    Canvas(2 * sw + 8, sh, px).save(os.path.join(a.outdir, "before_after.png"))
+    json.dump(out, open(os.path.join(a.outdir, "clarity.json"), "w"), indent=1)
+    print(json.dumps({k_: v for k_, v in out.items() if k_ not in ("before", "after")} | {
+        "clippedHigh%": [out["before"]["clippedHigh%"], out["after"]["clippedHigh%"]],
+        "clippedLow%": [out["before"]["clippedLow%"], out["after"]["clippedLow%"]]}))
+
+
+# X-Rite ColorChecker Classic (the formulation made since November 2014), D50 L*a*b* as X-Rite publishes them: four
+# rows of six, dark skin first, the neutral row last.
+CHECKER = [("dark skin", 37.54, 14.37, 14.92), ("light skin", 64.66, 19.27, 17.50), ("blue sky", 49.32, -3.82, -22.54),
+           ("foliage", 43.46, -12.74, 22.72), ("blue flower", 54.94, 9.61, -24.79), ("bluish green", 70.48, -32.26, -0.37),
+           ("orange", 62.73, 35.83, 56.50), ("purplish blue", 39.43, 10.75, -45.17), ("moderate red", 50.57, 48.64, 16.67),
+           ("purple", 30.10, 22.54, -20.87), ("yellow green", 71.77, -24.13, 58.19), ("orange yellow", 71.51, 18.24, 67.37),
+           ("blue", 28.37, 15.42, -49.80), ("green", 54.38, -39.72, 32.27), ("red", 42.43, 51.05, 28.62),
+           ("yellow", 81.80, 2.67, 80.41), ("magenta", 50.63, 51.28, -14.12), ("cyan", 49.57, -29.71, -28.32),
+           ("white", 95.19, -1.03, 2.93), ("neutral 8", 81.29, -0.57, 0.44), ("neutral 6.5", 66.89, -0.75, -0.06),
+           ("neutral 5", 50.76, -0.13, 0.14), ("neutral 3.5", 35.63, -0.46, -0.48), ("black", 20.64, 0.07, -0.46)]
+
+
+def de2000(lab1, lab2):
+    """CIEDE2000 colour difference (Sharma, Wu and Dalal's formulation): about 1 is just noticeable side by side."""
+    (L1, a1, b1), (L2, a2, b2) = lab1, lab2
+    Cm = (math.hypot(a1, b1) + math.hypot(a2, b2)) / 2
+    G = 0.5 * (1 - math.sqrt(Cm ** 7 / (Cm ** 7 + 25 ** 7)))
+    a1, a2 = (1 + G) * a1, (1 + G) * a2
+    C1, C2 = math.hypot(a1, b1), math.hypot(a2, b2)
+    h1 = math.degrees(math.atan2(b1, a1)) % 360 if C1 else 0.0
+    h2 = math.degrees(math.atan2(b2, a2)) % 360 if C2 else 0.0
+    dh = 0.0 if C1 * C2 == 0 else (h2 - h1 + 180) % 360 - 180
+    dH = 2 * math.sqrt(C1 * C2) * math.sin(math.radians(dh / 2))
+    Lm, Cpm = (L1 + L2) / 2, (C1 + C2) / 2
+    hm = h1 + h2 if C1 * C2 == 0 else (h1 + h2) / 2 if abs(h1 - h2) <= 180 else (h1 + h2 + 360) / 2 if h1 + h2 < 360 \
+        else (h1 + h2 - 360) / 2
+    T = (1 - 0.17 * math.cos(math.radians(hm - 30)) + 0.24 * math.cos(math.radians(2 * hm))
+         + 0.32 * math.cos(math.radians(3 * hm + 6)) - 0.20 * math.cos(math.radians(4 * hm - 63)))
+    Rt = -2 * math.sqrt(Cpm ** 7 / (Cpm ** 7 + 25 ** 7)) * math.sin(math.radians(60 * math.exp(-((hm - 275) / 25) ** 2)))
+    SL = 1 + 0.015 * (Lm - 50) ** 2 / math.sqrt(20 + (Lm - 50) ** 2)
+    SC, SH = 1 + 0.045 * Cpm, 1 + 0.015 * Cpm * T
+    return math.sqrt(((L2 - L1) / SL) ** 2 + ((C2 - C1) / SC) ** 2 + (dH / SH) ** 2 + Rt * (C2 - C1) / SC * dH / SH)
+
+
+def chart_centres(corners):
+    """The 24 patch centres from the centres of the four corner patches: dark skin, bluish green, black, white (the
+    chart's corners clockwise from dark skin, whichever way up it is), bilinear between them."""
+    (x1, y1), (x2, y2), (x3, y3), (x4, y4) = corners
+    out = []
+    for r in range(4):
+        for c in range(6):
+            u, v = c / 5, r / 3
+            out.append(((1 - u) * (1 - v) * x1 + u * (1 - v) * x2 + u * v * x3 + (1 - u) * v * x4,
+                        (1 - u) * (1 - v) * y1 + u * (1 - v) * y2 + u * v * y3 + (1 - u) * v * y4))
+    return out
+
+
+def mix(M, rgb):
+    """A Channel Mixer (rows as fractions) on one colour, unrounded."""
+    return [min(255.0, max(0.0, M[i][0] * rgb[0] + M[i][1] * rgb[1] + M[i][2] * rgb[2])) for i in range(3)]
+
+
+def whole_percent(row):
+    """A mixer row as whole percents adding up to exactly 100: a PSD stores the mixer in whole percents (33.33 x 3
+    reopens as 99 %, a photo 1.3 levels darker), so the plan uses exactly what any file will keep."""
+    p = [100 * v for v in row]
+    r = [round(v) for v in p]
+    d = 100 - sum(r)
+    for i in sorted(range(3), key=lambda i: (p[i] - r[i]) * (1 if d > 0 else -1), reverse=True)[:abs(d)]:
+        r[i] += 1 if d > 0 else -1
+    return r
+
+
+def nelder_mead(f, x0, step=0.05, iters=4000):
+    n = len(x0)
+    pts = [list(x0)] + [[x0[j] + (step if j == i else 0.0) for j in range(n)] for i in range(n)]
+    vals = [f(q) for q in pts]
+    for _ in range(iters):
+        order = sorted(range(n + 1), key=vals.__getitem__)
+        pts, vals = [pts[i] for i in order], [vals[i] for i in order]
+        if vals[-1] - vals[0] < 1e-10:
+            break
+        c = [sum(q[j] for q in pts[:-1]) / n for j in range(n)]
+        r = [2 * c[j] - pts[-1][j] for j in range(n)]
+        fr = f(r)
+        if fr < vals[0]:
+            e = [3 * c[j] - 2 * pts[-1][j] for j in range(n)]
+            fe = f(e)
+            pts[-1], vals[-1] = (e, fe) if fe < fr else (r, fr)
+        elif fr < vals[-2]:
+            pts[-1], vals[-1] = r, fr
+        else:
+            k = [(c[j] + pts[-1][j]) / 2 for j in range(n)]
+            fk = f(k)
+            if fk < vals[-1]:
+                pts[-1], vals[-1] = k, fk
+            else:
+                pts = [pts[0]] + [[(pts[0][j] + q[j]) / 2 for j in range(n)] for q in pts[1:]]
+                vals = [vals[0]] + [f(q) for q in pts[1:]]
+    return pts[0]
+
+
+def cmd_chart(a):
+    """Measure an X-Rite ColorChecker Classic in the photo against X-Rite's values; fit a Channel Mixer for the colour
+    the camera's rendering got wrong (curves can't: they only move each channel by its own value)."""
+    img = Image(a.image, a.max_side)
+    os.makedirs(a.outdir, exist_ok=True)
+    corners = [point(c)[:2] for c in a.corners]
+    if len(corners) != 4:
+        sys.exit("error: --corners takes the centres of four patches: dark skin, bluish green, black, white")
+    centres = chart_centres(corners)
+    pitch = min(math.dist(corners[0], corners[1]) / 5, math.dist(corners[0], corners[3]) / 3)
+    rad = max(3.0, a.radius_frac * pitch)
+    meas, clipped = [], []
+    for k, (x, y) in enumerate(centres):
+        pix = patch(img, (x, y, rad))
+        rgb, clip, _ = sample(img, (x, y, rad), pix)
+        meas.append(rgb)
+        if clip > 0.02:
+            clipped.append(CHECKER[k][0])
+    labs = [lab(*m, a.space) for m in meas]
+    warnings = []
+    neutral_L = [labs[k][0] for k in range(18, 24)]
+    if any(neutral_L[i] <= neutral_L[i + 1] for i in range(5)) or \
+            max(math.hypot(*labs[k][1:]) for k in range(18, 24)) > max(10.0, 0.5 * max(math.hypot(*labs[k][1:]) for k in range(18))):
+        sys.exit("error: the bottom row doesn't run white to black in grey steps: give the corner patch centres as dark "
+                 "skin, bluish green, black, white (clockwise from dark skin), and white-balance the photo first "
+                 "(color_check.py correct on the chart's greys)")
+    if clipped:
+        warnings.append(f"clipped patches ({', '.join(clipped)}): their colour is not measurable; the fit leaves them out")
+    greys = [labs[k] for k in range(19, 23)]
+    if max(max(abs(g[1]), abs(g[2])) for g in greys) > 2:
+        warnings.append("the chart's greys are more than 2 a*b* from neutral: run `correct` on them first, the mixer only "
+                        "fixes colour that a white balance can't")
+
+    def hue(L):
+        return math.degrees(math.atan2(L[2], L[1])) % 360
+
+    def report(cur):
+        rows = []
+        for k, (name, Lr, ar, br) in enumerate(CHECKER):
+            L = cur[k]
+            ref = (Lr, ar, br)
+            row = {"patch": name, "lab": [round(v, 1) for v in L], "ref": list(ref), "dE00": round(de2000(L, ref), 1),
+                   # at the measured lightness: exposure and the camera's tone curve aside, how far the colour is
+                   "dE00colour": round(de2000(L, (L[0], ar, br)), 1)}
+            if k < 18:
+                row["hueError"] = round((hue(L) - hue(ref) + 180) % 360 - 180, 1)
+                row["chroma"] = [round(math.hypot(*L[1:]), 1), round(math.hypot(ar, br), 1)]
+            rows.append(row)
+        colour = rows[:18]
+        return rows, {"meanDE00": round(sum(r["dE00"] for r in rows) / 24, 2),
+                      "meanDE00colour": round(sum(r["dE00colour"] for r in colour) / 18, 2),
+                      "maxDE00colour": max(r["dE00colour"] for r in colour),
+                      "meanAbsHueError": round(sum(abs(r["hueError"]) for r in colour) / 18, 1),
+                      "skinPatches": {r["patch"]: {"hueError": r["hueError"], "dE00colour": r["dE00colour"]} for r in colour[:2]}}
+
+    before_rows, before = report(labs)
+    out = {"image": img.name, "patchRadius": round(rad, 1), "before": before, "warnings": warnings}
+    M, layers = None, []
+    if a.fit != "none":
+        use = [k for k in range(18) if CHECKER[k][0] not in clipped]
+        targets = {}
+        for k in use:
+            L, (Lr, ar, br) = labs[k], CHECKER[k][1:]
+            if a.fit == "hue":  # the published hue at the camera's own lightness and chroma: fix the rotation only
+                C, h = math.hypot(*L[1:]), math.atan2(br, ar)
+                targets[k] = (L[0], C * math.cos(h), C * math.sin(h))
+            else:  # the published colour at the camera's lightness
+                targets[k] = (L[0], ar, br)
+        # the skin patch nearer the subject's measured skin (lit midtone) carries the weight; without --skin both do
+        skin_k = (0, 1)
+        if a.skin:
+            w0, h0, R0, G0, B0, s0 = img.small()
+            st = skin_stats(R0, G0, B0, area_mask(a.skin, w0, h0, s0), a.space)
+            if "litMidtone" in st:
+                L_skin = st["litMidtone"]["lab"]
+                skin_k = (min((0, 1), key=lambda k: de2000(labs[k], L_skin)),)
+                out["skinPatch"] = CHECKER[skin_k[0]][0]
+        wts = {k: (a.skin_weight if k in skin_k else 1.0) for k in use}
+
+        def mat(v):
+            return [[1 - v[0] - v[1], v[0], v[1]], [v[2], 1 - v[2] - v[3], v[3]], [v[4], v[5], 1 - v[4] - v[5]]]
+
+        def cost(v):
+            M_ = mat(v)
+            e = 0.0
+            for k in use:
+                L = lab(*mix(M_, meas[k]), a.space)
+                t = targets[k]
+                e += wts[k] * (0.5 * (L[0] - t[0]) ** 2 + (L[1] - t[1]) ** 2 + (L[2] - t[2]) ** 2)
+            return e / sum(wts.values()) + a.ridge * sum(x * x for x in v)
+
+        Mf = mat(nelder_mead(cost, [0.0] * 6))
+        pct = [whole_percent(row) for row in Mf]
+        M = [[v / 100 for v in row] for row in pct]
+        after_labs = [lab(*mix(M, m), a.space) for m in meas]
+        after_rows, after = report(after_labs)
+        out["mixer%"] = {"red": pct[0], "green": pct[1], "blue": pct[2]}
+        out["after"] = after
+        for k in skin_k:  # the subject's skin patch (both without --skin) pushed past its reference toward red
+            if before_rows[k]["hueError"] > after_rows[k]["hueError"] and after_rows[k]["hueError"] < -3:
+                warnings.append(f"{CHECKER[k][0]} ends {-after_rows[k]['hueError']:.0f}° redder than the chart: lower "
+                                "--skin-weight" + ("" if a.area else ", or mask the mixer to the skin with --area"))
+        # browns elsewhere in the photo (hair, wood, leather): the mixer acts on them too
+        w, h, R, G, B, s = img.small()
+        xs = [c[0] for c in corners]; ys = [c[1] for c in corners]
+        cx0, cx1 = (min(xs) - pitch) / s, (max(xs) + pitch) / s
+        cy0, cy1 = (min(ys) - pitch) / s, (max(ys) + pitch) / s
+        sk = area_mask(a.skin, w, h, s) if a.skin else None
+        hb, ha = [], []
+        for i in range(0, w * h, 2):
+            x, y = i % w, i // w
+            if (cx0 <= x <= cx1 and cy0 <= y <= cy1) or (sk and sk[i] > 0):
+                continue
+            L = lab(R[i], G[i], B[i], a.space)
+            C = math.hypot(L[1], L[2])
+            if 10 <= L[0] <= 65 and 6 <= C <= 40 and 30 <= hue(L) <= 75:
+                hb.append(hue(L))
+                ha.append(hue(lab(*mix(M, (R[i], G[i], B[i])), a.space)))
+        if len(hb) > 200:
+            mb, ma = sorted(hb)[len(hb) // 2], sorted(ha)[len(ha) // 2]
+            out["browns"] = {"pixels": len(hb), "medianHue": [round(mb, 1), round(ma, 1)]}
+            if ma < mb - 3 and not a.area:
+                warnings.append(f"browns elsewhere (hair, wood, leather; {len(hb)} sampled pixels) turn redder: median hue "
+                                f"{mb:.0f}° -> {ma:.0f}°; mask the mixer to the skin with --area skin.json")
+        layer = {"name": a.name, "adjustment": "channelMixer",
+                 "params": {"red": pct[0] + [0], "green": pct[1] + [0], "blue": pct[2] + [0]}}
+        mask_a, mask = None, None
+        if a.area:
+            mask_a = area_mask(a.area, img.w, img.h, img.s)
+            if a.feather > 0:
+                mask_a = imgops.gauss(mask_a, img.w, img.h, a.feather / img.s / 2)
+            mask = write_mask(img, mask_a, a.outdir)
+            layer["mask"] = "mask.png"
+        if a.skin:
+            out["skinBefore"] = skin_stats(R, G, B, sk, a.space)
+
+            def mixed_small():
+                k = round(s / img.s)
+                mk = imgops.downscale(mask_a, img.w, img.h, k)[0] if mask_a else None
+                o = [[], [], []]
+                for i in range(w * h):
+                    q = [round(v) for v in mix(M, (R[i], G[i], B[i]))]
+                    m = mk[i] if mk else 1.0
+                    for c, v in enumerate((R[i], G[i], B[i])):
+                        o[c].append(v + m * (q[c] - v))
+                return o
+            out["skinAfter"] = skin_stats(*mixed_small(), sk, a.space)
+        # exact preview where the mixer changes most (across the mask's edge when masked)
+        R2, G2, B2 = ([], [], [])
+        for i in range(len(img.R)):
+            q = [round(v) for v in mix(M, (img.R[i], img.G[i], img.B[i]))]
+            m = mask_a[i] if mask_a else 1.0
+            R2.append(img.R[i] + m * (q[0] - img.R[i])); G2.append(img.G[i] + m * (q[1] - img.G[i]))
+            B2.append(img.B[i] + m * (q[2] - img.B[i]))
+        change = [abs(R2[i] - img.R[i]) + abs(G2[i] - img.G[i]) + abs(B2[i] - img.B[i]) for i in range(len(R2))]
+        x0, y0 = verify_window(img, change, [1.0 if v < 0.5 else 0.0 for v in mask_a] if mask_a else None, a.at)
+        cw, ch = min(512, img.W), min(512, img.H)
+        w_, h_, Rw, Gw, Bw = img.crop(x0, y0, cw, ch)
+        Mw = mask[1](x0, y0, cw, ch) if mask else None
+        P = [[], [], []]
+        for i in range(w_ * h_):
+            q = [min(255, max(0, round((pct[c][0] * Rw[i] + pct[c][1] * Gw[i] + pct[c][2] * Bw[i]) / 100))) for c in range(3)]
+            m = Mw[i] if Mw else 1.0
+            for c, v in enumerate((Rw[i], Gw[i], Bw[i])):
+                P[c].append(v + m * (q[c] - v))
+        imgops.save_rgb(os.path.join(a.outdir, "preview.png"), w_, h_, *P)
+        center = [mask[0][0] + mask[0][2] / 2, mask[0][1] + mask[0][3] / 2] if mask else [img.W / 2, img.H / 2]
+        json.dump({"center": center, "crop": [x0, y0, cw, ch], "preview": "preview.png", "group": a.group,
+                   "layers": [layer]}, open(os.path.join(a.outdir, "layers.json"), "w"), indent=1)
+        layers = [after_rows]
+    # chart.png: per patch three stripes, as measured | after the mixer | X-Rite's value
+    cell, gap = 66, 6
+    W, H = 6 * (cell + gap) + gap, 4 * (cell + gap) + gap
+    cv = Canvas(W, H, [[40, 40, 40] for _ in range(W * H)])
+    for k in range(24):
+        r, c = divmod(k, 6)
+        ref_rgb = [max(0.0, min(255.0, v)) for v in imgops.lab_to_rgb(*CHECKER[k][1:], a.space)]
+        cols = [meas[k], [round(v) for v in mix(M, meas[k])] if M else meas[k], ref_rgb]
+        for j, col in enumerate(cols):
+            for y in range(cell):
+                for x in range(cell // 3):
+                    cv.put(gap + c * (cell + gap) + j * (cell // 3) + x, gap + r * (cell + gap) + y, list(col))
+    cv.save(os.path.join(a.outdir, "chart.png"))
+    out["patches"] = [dict(b, after=(layers[0][k] if layers else None)) for k, b in enumerate(before_rows)]
+    json.dump(out, open(os.path.join(a.outdir, "chart.json"), "w"), indent=1)
+    print(json.dumps({k: v for k, v in out.items() if k != "patches"}))
+
+
 def cmd_compare(a):
     imgs = [Image(p, a.max_side) for p in (a.before, a.after)]
     out = {}
@@ -814,12 +1401,15 @@ def cmd_compare(a):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--max-side", type=int, default=1200, help="analysis copy size in px (big images are scaled by the CLI)")
     ap.add_argument("--space", choices=("srgb", "p3"), default="srgb", help="the document's RGB space, for Lab numbers")
     sub = ap.add_subparsers(dest="cmd", required=True)
+    common = argparse.ArgumentParser(add_help=False)  # also accepted after the subcommand (it wins there)
+    common.add_argument("--max-side", type=int, default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    common.add_argument("--space", choices=("srgb", "p3"), default=argparse.SUPPRESS, help=argparse.SUPPRESS)
 
-    p = sub.add_parser("measure", help="tone, clipping, cast (neutral samples or estimate), skin")
+    p = sub.add_parser("measure", parents=[common], help="tone, clipping, cast (neutral samples or estimate), skin")
     p.add_argument("image")
     p.add_argument("--neutral", action="append", default=[], metavar="X,Y[,R]", help="a surface that is neutral in life")
     p.add_argument("--skin", metavar="AREA")
@@ -827,7 +1417,7 @@ def main():
     p.add_argument("--scope", help="PNG: vectorscope with the skin-tone line")
     p.set_defaults(fn=cmd_measure)
 
-    p = sub.add_parser("correct", help="white balance (and black/white point) as Curves layers")
+    p = sub.add_parser("correct", parents=[common], help="white balance (and black/white point) as Curves layers")
     p.add_argument("image"); p.add_argument("outdir")
     p.add_argument("--neutral", action="append", default=[], metavar="X,Y[,R]",
                    help="neutral surface; repeat for several at different levels (shadow, mid, highlight)")
@@ -838,8 +1428,10 @@ def main():
     p.add_argument("--amount", type=float, default=1.0, help="fraction of the cast removed: 0.6-0.8 keeps intended warmth")
     p.add_argument("--tone", action="store_true", help="add a 'Black & white point' curve")
     p.add_argument("--clip", type=float, default=0.05, help="%% of pixels allowed past each end with --tone")
-    p.add_argument("--black-target", type=float, default=4)
-    p.add_argument("--white-target", type=float, default=251)
+    p.add_argument("--for", dest="output", choices=sorted(TARGETS), default="screen",
+                   help="--tone end points by output: screen 4/251, print 8/244 (detail the press or paper can hold)")
+    p.add_argument("--black-target", type=float, help="--tone: the darkest level (overrides --for)")
+    p.add_argument("--white-target", type=float, help="--tone: the lightest level (overrides --for)")
     p.add_argument("--skin", metavar="AREA", help="report the skin angle before and after")
     p.add_argument("--area", metavar="AREA", help="mixed light: apply this white balance only here (masked layer)")
     p.add_argument("--feather", type=float, default=40, help="px the --area mask fades over")
@@ -847,7 +1439,7 @@ def main():
     p.add_argument("--group", default="Colour correction")
     p.set_defaults(fn=cmd_correct)
 
-    p = sub.add_parser("match", help="match a reference shot's colour and tone with per-channel curves")
+    p = sub.add_parser("match", parents=[common], help="match a reference shot's colour and tone with per-channel curves")
     p.add_argument("image"); p.add_argument("reference"); p.add_argument("outdir")
     p.add_argument("--amount", type=float, default=1.0)
     p.add_argument("--points", type=int, default=5, help="quantiles fitted per channel (5 = 2/25/50/75/98 %%)")
@@ -858,7 +1450,41 @@ def main():
     p.add_argument("--group", default="Colour match")
     p.set_defaults(fn=cmd_match)
 
-    p = sub.add_parser("compare", help="before/after numbers")
+    p = sub.add_parser("clarity", parents=[common], help="local contrast (High Pass or Unsharp Mask) on a stamp, masked off skin")
+    p.add_argument("image"); p.add_argument("outdir")
+    p.add_argument("--skin", metavar="AREA", help="skin to keep out (feathered): clarity deepens pores and blemishes")
+    p.add_argument("--method", choices=("highpass", "usm"), default="highpass")
+    p.add_argument("--radius", type=float, help="px; default 3 %% of the long side (highpass), 1.5 %% (usm)")
+    p.add_argument("--blend", choices=sorted({b for v in CLARITY_BLENDS.values() for b in v}),
+                   help="highpass: Overlay (default), Soft Light, Hard Light, Linear Light; usm: Normal (default), Luminosity")
+    p.add_argument("--opacity", type=float, help="default 0.5 (highpass in Overlay), 1 (usm)")
+    p.add_argument("--amount", type=float, default=20, help="usm amount, %% (KelbyOne: 5-30)")
+    p.add_argument("--colour", action="store_true", help="highpass: keep its colour (adds colour contrast as well)")
+    p.add_argument("--feather", type=float, default=40, help="px the skin protection fades over")
+    p.add_argument("--at", metavar="X,Y", help="centre of the verify window (default: where the layer changes most, "
+                                                 "across the skin mask's edge)")
+    p.add_argument("--name", default="Local contrast")
+    p.add_argument("--group", default=None, help="group name (default: none)")
+    p.set_defaults(fn=cmd_clarity)
+
+    p = sub.add_parser("chart", parents=[common], help="measure a ColorChecker against X-Rite's values; fit a Channel Mixer")
+    p.add_argument("image"); p.add_argument("outdir")
+    p.add_argument("--corners", nargs=4, required=True, metavar="X,Y",
+                   help="centres of the dark skin, bluish green, black and white patches (clockwise from dark skin)")
+    p.add_argument("--fit", choices=("lab", "hue", "none"), default="lab",
+                   help="lab: X-Rite's colours at the camera's lightness (default); hue: only their hues; none: measure")
+    p.add_argument("--skin-weight", type=float, default=3.0, help="weight of the two skin patches in the fit")
+    p.add_argument("--ridge", type=float, default=20.0, help="pull toward no change (larger = gentler mixer)")
+    p.add_argument("--skin", metavar="AREA", help="report this skin before and after (and leave it out of the brown check)")
+    p.add_argument("--area", metavar="AREA", help="mask the mixer to this area (the skin, usually), feathered")
+    p.add_argument("--feather", type=float, default=30, help="px the --area mask fades over")
+    p.add_argument("--radius-frac", type=float, default=0.22, help="sampled disk radius, x the patch pitch")
+    p.add_argument("--at", metavar="X,Y", help="centre of the verify window (default: where the mixer changes most)")
+    p.add_argument("--name", default="Camera colour (chart)")
+    p.add_argument("--group", default=None)
+    p.set_defaults(fn=cmd_chart)
+
+    p = sub.add_parser("compare", parents=[common], help="before/after numbers")
     p.add_argument("before"); p.add_argument("after")
     p.add_argument("--neutral", action="append", default=[], metavar="X,Y[,R]")
     p.add_argument("--skin", metavar="AREA")

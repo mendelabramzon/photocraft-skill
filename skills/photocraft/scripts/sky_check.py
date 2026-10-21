@@ -2,6 +2,7 @@
 """Plan, enhance and check a sky replacement, from a sky_mask.py folder (crop.png, alpha.png, edge.png, mask.json).
 
   sky_check.py plan    maskdir sky.jpg [--sky-x 0.5 --sky-y 1 --zoom 1 --flip] [--harmonize 0.5] [--ev 0] [--haze 0.3]
+                       [--wrap 0.3]
   sky_check.py plan    maskdir --clear-blue [--haze 0.2]           (real-estate gradient sky, no sky photo)
   sky_check.py enhance maskdir [--contrast 1.35] [--grad 0.5]      (keep the sky, give it depth)
   sky_check.py check   maskdir [--render export.png]               (after the import: halo, grain, horizon)
@@ -12,6 +13,7 @@ and new sky and the land, and writes layers.json for import_layers.py:
 
   Sky replacement (group)
     Horizon haze             Solid Color = the old sky's horizon colour, mask = a ramp up from the horizon (--haze)
+    Light wrap               the new sky blurred, Screen, mask = a band on the land side of the skyline (--wrap)
     Sky                      the fitted sky photo, mask = alpha.png
     Foreground harmonise     Curves, red/green/blue: the land takes part of the new light's colour (--harmonize)
                              and an exposure change (--ev), in linear light
@@ -31,8 +33,9 @@ overcast foreground sunlit.
 check takes the luminance profile across the sky edge in 24 px tiles. A light rim right at the edge, brighter than
 both the new sky beside it and the land behind it, is the old sky left in the edge pixels or a mask that stops
 short. Thin things (finials, aerials, twigs) have no inside to compare with, and against a darker new sky their
-stone or metal rightly looks lighter than the sky, so those tiles are only marked for the eye. It also compares
-the new sky's grain with the old one's and reports how the sky's brightness runs toward the horizon.
+stone or metal rightly looks lighter than the sky, so those tiles are only marked for the eye. A light wrap (a
+deliberate light rim on the land side) is taken back out of the render first, at the opacity the render shows. It
+also compares the new sky's grain with the old one's and reports how the sky's brightness runs toward the horizon.
 """
 import argparse
 import json
@@ -41,8 +44,9 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from imgops import box, components, downscale, from_linear, load, lut_f, percentile, save_gray, save_rgb, set_lum, \
-    spline_lut, to_linear
+from cutout_check import edge_distance
+from imgops import blend, box, components, downscale, from_linear, gauss, load, lut_f, percentile, save_gray, save_rgb, \
+    set_lum, spline_lut, to_linear
 from sky_mask import cli_run
 
 NOISE_PER_AMOUNT = 0.64  # Add Noise (gaussian, monochromatic): sigma in levels per unit of amount (PhotoCraft 0.7.0)
@@ -295,7 +299,29 @@ def cmd_plan(a):
         haze = [c for c in s_old]
         save_gray(os.path.join(md, "haze.png"), w, h, hm)
 
-    # exact preview, stacked like the document: Background -> Sky edges -> Foreground harmonise -> Sky -> haze
+    # light wrap: the new sky's light spilling over the land's edge along the skyline, as compositors do it (Planet
+    # Photoshop): the sky blurred until no cloud detail is left, Screen, masked to a band on the land side of the
+    # edge that fades over --wrap-width px, times the land's share of each edge pixel. Screen only lightens, and
+    # most where the sky behind is bright; a dark land edge under a dark sky stays as it is.
+    wrap = None
+    wm = [0.0] * N
+    if a.wrap > 0:
+        ww = a.wrap_width or max(3.0, 0.006 * w)
+        wbl = a.wrap_blur or max(8.0, 0.02 * w)
+        WR = [[round(min(255.0, max(0.0, v))) for v in gauss(c_, w, h, wbl)] for c_ in (NR, NG, NB)]
+        land = [1 if v < 0.5 else 0 for v in A]
+        dl = edge_distance(land, w, h, cap=int(ww) + 2)  # 1 = land touching the sky edge
+        for i in range(N):
+            if A[i] < 0.99:
+                d_ = dl[i] if land[i] else 0
+                if d_ <= ww:
+                    wm[i] = round((1 - A[i]) * (1 - d_ / (ww + 1)) ** 2 * 255) / 255
+        save_rgb(os.path.join(md, "wrap.png"), w, h, *WR)
+        save_gray(os.path.join(md, "wrap_mask.png"), w, h, wm)
+        wrap = {"amount": a.wrap, "width": round(ww, 1), "blur": round(wbl, 1)}
+
+    # exact preview, stacked like the document: Background -> Sky edges -> Foreground harmonise -> Sky -> light
+    # wrap -> haze
     _, _, ER, EG, EB = load(os.path.join(md, "edge.png"))
     EM = [v / 255 for v in load(os.path.join(md, "edge_mask.png"))[2]]
     q = lambda v: round(min(1.0, max(0.0, v)) * 255) / 255
@@ -308,6 +334,8 @@ def cmd_plan(a):
         base = [float(lut_f(lt, v)) for lt, v in zip(luts, base)]
         al = A[i]
         o = [al * s + (1 - al) * b for s, b in zip((NR[i], NG[i], NB[i]), base)]
+        if wrap and wm[i]:
+            o = list(blend("screen", o, (WR[0][i], WR[1][i], WR[2][i]), a.wrap * wm[i]))
         if hcol and hq[i]:
             o = [hq[i] * c + (1 - hq[i]) * v for c, v in zip(hcol, o)]
         for k in range(3):
@@ -335,6 +363,9 @@ def cmd_plan(a):
     layers = [{"name": "Sky edges (decontaminated)", "image": "edge.png", "mask": "edge_mask.png"},
               {"name": "Foreground harmonise", "adjustment": "curves", "params": curves},
               {"name": "Sky", "image": "sky_fitted.png", "mask": "alpha.png"}]
+    if wrap:
+        layers.append({"name": "Light wrap", "image": "wrap.png", "mask": "wrap_mask.png", "blend": "Screen",
+                       "opacity": a.wrap})
     if haze:
         layers.append({"name": "Horizon haze", "fill": to_hex(haze), "mask": "haze.png"})
     spec = {"center": meta["center"], "crop": meta["crop"], "preview": "preview.png", "group": "Sky replacement",
@@ -344,7 +375,7 @@ def cmd_plan(a):
              "stopsAboveLand": {"old": round(stops_old, 2), "new": round(stops_new, 2)},
              "lightOld": [round(v, 1) for v in l_old] if l_old else None, "lightNew": [round(v, 1) for v in l_new] if l_new else None,
              "harmonize": a.harmonize, "gains": [round(g, 4) for g in gains], "ev": a.ev,
-             "haze": {"amount": a.haze, "color": to_hex(haze)} if haze else None, "warnings": warnings}
+             "haze": {"amount": a.haze, "color": to_hex(haze)} if haze else None, "wrap": wrap, "warnings": warnings}
     json.dump(stats, open(os.path.join(md, "plan.json"), "w"), indent=1)
     print(json.dumps(stats))
 
@@ -487,6 +518,44 @@ def cmd_check(a):
     else:
         path = os.path.join(md, "preview.png")
     _, _, R, G, B = load(path)
+    # a light wrap is a deliberate light rim on the land side: take it back out, so the halo measure still means old
+    # sky left in the edge pixels. At the opacity the render has, which needn't be the planned one (the layer lowered,
+    # raised or hidden): Screen at opacity k is below + k s (1 - below) in 0..1, the pixels below it come from the
+    # preview (the planned wrap inverted out of it, exactly), so the render's k is a least-squares fit over the band.
+    # The fit assumes the rest of the document is as planned.
+    wrapped = None
+    plan_path = os.path.join(md, "plan.json")
+    wrap = json.load(open(plan_path)).get("wrap") if os.path.exists(plan_path) else None
+    if wrap and os.path.exists(os.path.join(md, "wrap.png")) and not a.keep_wrap:
+        _, _, WR, WG, WB = load(os.path.join(md, "wrap.png"))
+        WM = load(os.path.join(md, "wrap_mask.png"))[2]
+        band = [i for i, m in enumerate(WM) if m >= 26]
+
+        def unwrap(px, i, k):
+            km = k * WM[i] / 255
+            return [min(255.0, max(0.0, 255 * (o / 255 - km * s / 255) / max(1e-6, 1 - km * s / 255)))
+                    for o, s in zip(px, (WR[i], WG[i], WB[i]))]
+        _, _, PR_, PG_, PB_ = load(os.path.join(md, "preview.png"))
+        num = den = 0.0
+        for i in band:
+            below = unwrap((PR_[i], PG_[i], PB_[i]), i, wrap["amount"])
+            m = WM[i] / 255
+            for o, b_, s in zip((R[i], G[i], B[i]), below, (WR[i], WG[i], WB[i])):
+                g_ = m * s / 255 * (1 - b_ / 255)
+                num += (o - b_) / 255 * g_
+                den += g_ * g_
+        k = min(1.0, max(0.0, num / den)) if den > 0 else 0.0
+        wrapped = {"planned": wrap["amount"], "inRender": round(k, 3)}
+        if k >= 0.05:  # below that, rounding or other changes to the document, not a wrap (a lift of 1-2 levels)
+            R, G, B = list(R), list(G), list(B)
+            lift = 0.0
+            for i in band:
+                u = unwrap((R[i], G[i], B[i]), i, k)
+                lift += (0.3 * (R[i] - u[0]) + 0.59 * (G[i] - u[1]) + 0.11 * (B[i] - u[2]))
+                R[i], G[i], B[i] = u
+            wrapped.update({"takenOutForTheHaloCheck": True, "meanLift": round(lift / len(band), 2)})
+        else:
+            wrapped.update({"takenOutForTheHaloCheck": False, "note": "the render shows no light wrap"})
     L = [0.3 * r + 0.59 * g + 0.11 * b for r, g, b in zip(R, G, B)]
     sky = [i for i, v in enumerate(A) if v >= 0.99]
     g_new = grain(L, w, h, sky[::7])
@@ -528,11 +597,11 @@ def cmd_check(a):
                      "worst": [[t[0] * T + T // 2, t[1] * T + T // 2, round(t[2], 1)] for t in bad[:6]]},
         "darkRim": {"tiles": len(dark), "worst": [[t[0] * T + T // 2, t[1] * T + T // 2, round(t[3], 1)] for t in dark[:4]]},
         "grain": {"oldSky": round(g_old, 2), "newSky": round(g_new, 2)},
-        "skyLuminance": bands}))
+        "skyLuminance": bands, "lightWrap": wrapped}))
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("plan", help="fit a new sky, harmonise the land, write layers.json + exact preview")
     p.add_argument("maskdir"); p.add_argument("sky", nargs="?", help="the new sky photo")
@@ -549,6 +618,10 @@ def main():
     p.add_argument("--haze", type=float, default=0.0, help="horizon haze opacity at the skyline (0.2-0.4)")
     p.add_argument("--haze-height", type=float, default=0.35, help="haze height, x the sky's height above the skyline")
     p.add_argument("--no-grain", dest="grain", action="store_false", help="don't add grain to a cleaner sky")
+    p.add_argument("--wrap", type=float, default=0.0, help="light wrap opacity: the new sky's light over the land's "
+                   "edge (0.2-0.4)")
+    p.add_argument("--wrap-width", type=float, help="px the wrap reaches into the land (default 0.6 %% of the width)")
+    p.add_argument("--wrap-blur", type=float, help="blur of the sky for the wrap (default 2 %% of the width)")
     p = sub.add_parser("enhance", help="improve the existing sky in place (or say it needs replacing)")
     p.add_argument("maskdir")
     p.add_argument("--contrast", type=float, default=1.35, help="spread of the sky's own tones around their median")
@@ -557,6 +630,7 @@ def main():
     p.add_argument("maskdir")
     p.add_argument("--render", help="export of the document (full size or the crop); default preview.png")
     p.add_argument("--threshold", type=float, default=3.0, help="levels a rim must rise above sky and land to count")
+    p.add_argument("--keep-wrap", action="store_true", help="measure the render as it is, planned light wrap included")
     a = ap.parse_args()
     if a.cmd == "plan" and not a.sky and not a.clear_blue:
         sys.exit("error: give a sky photo, or --clear-blue")

@@ -201,6 +201,24 @@ Before showing it:
 - eye whites not glowing, pink, orange or blue
 - both eyes looking at the same point, catchlights on the side the light comes from, in both eyes
 - eye size plausible for the face, tilt following the head
+- no seam: measured below, and looked at along the whole mask edge at 3x. A swap is exactly what close inspection
+  catches: in March 2024 four news agencies withdrew a family photo over a misaligned sleeve and a hand that didn't
+  line up, the seams of a multi-frame composite.
+
+Measure the seam along the donor's mask: grain inside against outside (a smoother or noisier patch), the tone step
+across it once the gradient is taken out (a lighter block), and edge sharpness on both sides. The mask comes out as
+a document of its own, the same size as the photo (tested: identical to the layer's mask):
+
+    $PC exec layer.select '{"layer": <donor id>}'
+    $PC exec channel.duplicate '{"channel": "mask", "document": "new"}'
+    $PC call app.save '{"path": "/abs/path/work/x/swap_mask.png"}'   # the new document is active
+    $PC exec file.close '{"document": <its index>}'
+    $PC exec document.activate '{"document": <the photo index>}'
+    $PC export ~/.photocraft-skill/work/x/after.png
+    python3 qc.py seams after.png swap_mask.png ~/.photocraft-skill/work/x/seams
+
+For speed on a big photo, crop both to the face with the CLI (same rectangle) and add `--origin X Y`. Read
+`seams.png` and the flagged tiles: a tone step means the tone curves (Step 3) or the mask, not the seam itself.
 
 Then save a layered PSD and a JPEG with new names (SKILL.md, "Saving"). After reopening a PSD, layer
 ids change, so read them again from `document.inspect`.
@@ -234,6 +252,13 @@ Same steps with other landmarks and a hand-drawn mask:
   target's hair edge.
 - Tone: `tone without.png with.png --sample X,Y ...` with samples on the skin just outside the seam,
   all round.
+- **A head from another setup** (another camera, ISO, light or day) also brings its own grain and black level, which
+  the tone step doesn't touch; `qc.py seams` shows the grain ratio. Treat it as a composite (`references/composite.md`):
+  with the aligned donor masked, hide every other layer and export the donor alone as a PNG with transparency, then
+  `composite.py without.png donor.png <dir> --same-frame --wrap 0` plans its black and white points, colour of light
+  and grain against the target, in place. Import that group and hide the original donor layer and its tone curves.
+  On a subject cut from one frame of a white-balance series and put into another frame of the same shot, that took
+  the colour error from dE 18.9 to 6.4.
 
 ## What PhotoCraft can't do
 
@@ -242,4 +267,12 @@ Same steps with other landmarks and a hand-drawn mask:
   a generative tool, or to paint on a separate layer with honest expectations.
 - **Auto-Align on patches or different setups.** It only aligns whole near-identical frames (Step 2).
 - **Changing the expression.** `filter.liquify` can soften a furrowed brow, but that changes the
-  person's face: ask first.
+  person's face: ask first, unless the user already asked for a livelier or "less sleepy" face.
+  Then keep it to a few pixels, on a named stamp layer they can switch off:
+  - **Lid lift** (`forwardWarp`, size 40, three strokes along each upper lash line, the middle one
+    longest): at most 4–5 px on a ~1000 px photo. At 6–9 px the lashes fuse into a black mass and the
+    pupil stretches into a vertical slit, which only shows at 5×; judge every eye at 5× against the
+    original, not at fit-to-screen.
+  - **Brows** up 4–5 px and **mouth corners** up about 4 px (size 28) read as awake and stay natural.
+  - Stamp Visible first (`"stamp": [["filter.liquify", {"strokes": […]}]]` in `layers.json`), and put
+    any later adjustment layers above it: layers below a stamp no longer show.

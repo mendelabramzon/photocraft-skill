@@ -21,8 +21,28 @@ ground is foreign and a stripe, nostril or mouth line belongs to its surrounding
 defect (catchlights, specular highlights on buttons, white lettering, lace) must still be excluded with area.json;
 faces get stricter thresholds. Read overlay.png before importing.
 
+Dense damage (flaking emulsion, crazing, mould spots close together) defeats both the medians and the gate: a median
+of a patch that is mostly flakes is a flake, and the "clean ring" round each flake is more flakes. A top-hat (the
+photo minus its opening, radius --dense-radius) finds the small flakes and cracks at any density; where they cover
+--dense-share of a 41 px window, or the ring round a candidate is at least --dense-ring defective, the area is a
+dense zone, listed and drawn, with dense_light.png (dense_dark.png) masking its defects. Sky through foliage, lace,
+a plaid or a patterned tie make zones too: they show tinted in overlay.png; exclude them in area.json. With --dense
+the zones' defects leave the median layers and heal.json (Remove loops smear grey there) for the dense route:
+layers.json adds Dust & Scratches (--dense-ds) through the mask in Darken (Lighten for dark damage), which only
+darkens what is lighter than its surroundings, and an empty layer with the same mask and mode for Clone Stamp strokes
+from clean texture; each zone outside faces lists a cloneFrom offset, and --clone-plan writes the strokes
+(dense_light.json). A crisp light flake on or within 24 px of a face, by an eyebrow, the hairline or a beard, whose
+ring spans both, is planned when it stands 4x --min-contrast beyond 90 % of that ring.
+
+Big scans go in regions of about 2 MP: a 2.1 MP band took 150 s and 5 GB of memory. Crop them with some overlap and
+give each run --own, the part of the photo it is responsible for, so the overlap isn't planned twice. Each run's
+layer group is named after its region, and its stamp layers are cleared outside it, so a PSD doesn't carry a
+full-canvas copy per layer. heal.json starts by selecting its layer: plan with --layer ID, or run it with
+`pc.py script heal.json --layer-name Heal`, which puts the Heal layer's id into every step.
+
 usage: find_defects.py crop.png cropX cropY outdir [--area area.json] [--texture 4] [--line-threshold 5]
                        [--fine 2] [--coarse 5] [--polarity both|light|dark] [--no-grain] [--layer ID] [--add X,Y[,D] ...]
+                       [--own X0,Y0,X1,Y1] [--group NAME] [--dense [--dense-ds 4,8] [--clone-plan]]
 
 crop.png   the photo or a region of it at full resolution (image.crop); cropX/cropY = where it sits in the photo
 area.json  optional, full-image coordinates: {"area": polygon(s) to work in (default: all of the crop),
@@ -30,8 +50,9 @@ area.json  optional, full-image coordinates: {"area": polygon(s) to work in (def
            "faces": [polygon, ...] (stricter: only clear specks and scratches)}
 Writes to outdir: fine*.png and coarse*.png (the masks), layers.json (the median layers for import_layers.py, with a
 verify window and its exact preview.png), heal.json (pc.py script steps for an empty "Heal" layer), overlay.png
-(2x: green = fine, yellow = coarse, red rings = heal dabs, magenta boxes = large damage, blue = candidates left
-alone as real detail) and defects.json.
+(2x: green = fine, yellow = coarse, red rings = heal dabs, magenta boxes = large damage, orange = dense damage, its
+zones and (tinted) its mask, blue = candidates left alone as real detail), dense_light.png / dense_dark.png (when
+there are dense zones), dense_light.json (--clone-plan) and defects.json.
 """
 import argparse
 import json
@@ -136,7 +157,7 @@ def hull(points):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("crop"); ap.add_argument("ox", type=int); ap.add_argument("oy", type=int); ap.add_argument("outdir")
     ap.add_argument("--area", help="area.json: area / exclude / faces polygons, full-image coordinates")
     ap.add_argument("--min-contrast", type=float, default=12, help="levels: never flag less than this")
@@ -163,7 +184,33 @@ def main():
     ap.add_argument("--layer", type=int, help="layer id for the healing dabs (default: the active layer)")
     ap.add_argument("--add", action="append", default=[], metavar="X,Y[,D]", help="also heal this spot (full-image coords)")
     ap.add_argument("--window", type=int, default=640, help="size of the verify window")
+    ap.add_argument("--own", help="X0,Y0,X1,Y1 in the photo: this run plans only defects centred in it (regions that "
+                                  "overlap their neighbours then plan nothing twice)")
+    ap.add_argument("--group", help="layer group name (default: 'Dust & scratches', with the region's position when the "
+                                    "crop isn't the whole photo)")
+    ap.add_argument("--dense-ring", type=float, default=0.4,
+                    help="share of the ring round a candidate that is itself defective above which it is dense damage")
+    ap.add_argument("--dense-radius", type=int, default=5, help="px: the opening that measures dense small flakes")
+    ap.add_argument("--dense-polarity", default="light", choices=["light", "dark", "both"],
+                    help="which small damage makes dense zones: light flaking and crazing (default); dark only for mould "
+                         "or dirt (hair and beards read as dense dark specks)")
+    ap.add_argument("--dense-share", type=float, default=0.12,
+                    help="share of a 41 px window covered by small flakes (in 6+ pieces) that makes a dense zone")
+    ap.add_argument("--dense-ds", default="4,8", metavar="RADIUS,THRESHOLD",
+                    help="Dust & Scratches of the Darken (Lighten) layer through the dense masks; 0 for none")
+    ap.add_argument("--dense", action="store_true",
+                    help="repair the dense zones: their defects leave the median layers and heal.json for a Dust & "
+                         "Scratches layer (Darken) and an empty Clone layer through dense_light.png (check the zones first)")
+    ap.add_argument("--clone-plan", action="store_true",
+                    help="also write dense_light.json: a Clone Stamp stroke over each dense zone outside faces from its "
+                         "cloneFrom offset, for the empty Clone layer (check the zones first: see references/restore.md)")
     a = ap.parse_args()
+    a.dense = a.dense or a.clone_plan
+    try:
+        ds_r, ds_t = ([float(v) for v in a.dense_ds.split(",")] + [8.0])[:2]
+    except ValueError:
+        ap.error("--dense-ds is RADIUS,THRESHOLD (4,8), or 0")
+    ds = {"radius": ds_r, "threshold": ds_t}
     os.makedirs(a.outdir, exist_ok=True)
     cli = pc.find_cli()
     if not cli:
@@ -236,7 +283,7 @@ def main():
             i = y * w + x
             grad[i] = math.hypot(Ms[i + 1] - Ms[i - 1], Ms[i + w] - Ms[i - w]) / 2
 
-    classes = {"fine": [], "coarse": [], "heal": [], "large": [], "kept": []}
+    classes = {"fine": [], "coarse": [], "heal": [], "large": [], "kept": [], "dense": []}
     comps_out = []
     for sign in ((1, -1) if a.polarity == "both" else (1,) if a.polarity == "light" else (-1,)):
         ff = [a.face_factor if faces[i] > 0.5 else 1.0 for i in range(N)]
@@ -320,7 +367,12 @@ def main():
                   for sign in ((1, -1) if a.polarity == "both" else (1,) if a.polarity == "light" else (-1,))]
     for radius, Mbig, sign in big_passes:
         ress = [Gy[i] - Mbig[i] for i in range(N)]
-        texs = spread(ress, 2 * radius)  # a window much wider than the blob, so the blob can't raise its own bar
+        # a window much wider than the blob, so the blob can't raise its own bar. Inside faces, for the polarity of the
+        # damage (light flaking by default, --dense-polarity), pixels already 6x the grain off are left out of it too,
+        # or a face covered in flakes raises the bar over the flakes themselves (150 levels); dark masses (hair,
+        # shadows) would pass that lower bar, and outside faces so would sky through leaves
+        robust = a.dense_polarity == "both" or (a.dense_polarity == "light") == (sign > 0)
+        texs = spread([0.0 if robust and faces[i] > 0.5 and abs(v) > 6 * sigma else v for i, v in enumerate(ress)], 2 * radius)
         thr = [max(2.5 * a.min_contrast, a.texture * texs[i]) * (a.face_factor if faces[i] > 0.5 else 1.0) for i in range(N)]
         grow = [ok[i] and sign * ress[i] > 0.5 * thr[i] for i in range(N)]
         for pix in imgops.components(grow, w, h):
@@ -356,6 +408,36 @@ def main():
         for c in classes:
             classes[c] = [r for r in classes[c] if not any(r is g for g in gone)]
 
+    # small flakes and cracks at any density, for the dense route below: the photo minus its opening (Minimum then
+    # Maximum, radius --dense-radius) keeps light structures narrower than the opening however close together they
+    # are, where a median of a patch that is mostly flakes is a flake (closing and the reverse for dark damage). The
+    # narrow edge bits of a big light area (a white dress) are left too, but they sit next to it: a piece whose
+    # surroundings in an opening 5x wider (which flaking full of holes doesn't survive, a dress does) are about as
+    # light as itself is not a flake.
+    rd = a.dense_radius
+    flakes, opened = {}, {}
+    for sign in [s for s in (1, -1) if (a.dense_polarity == "both" or (a.dense_polarity == "light") == (s > 0))
+                 and (a.polarity == "both" or (a.polarity == "light") == (s > 0))]:
+        first, second = ("minimum", "maximum") if sign > 0 else ("maximum", "minimum")
+        run("run", tmp("g"), *med(1), "--cmd", f"filter.other.{first}", "--params", json.dumps({"radius": rd, "preserve": "squareness"}),
+            "--cmd", f"filter.other.{second}", "--params", json.dumps({"radius": rd, "preserve": "squareness"}), "--out", tmp("open"))
+        run("run", tmp("g"), *med(1), "--cmd", f"filter.other.{first}", "--params", json.dumps({"radius": 5 * rd, "preserve": "squareness"}),
+            "--cmd", f"filter.other.{second}", "--params", json.dumps({"radius": 5 * rd, "preserve": "squareness"}), "--out", tmp("openb"))
+        run("run", tmp("g"), *med(1), "--out", tmp("g1"))
+        Op, Ob, G1 = (imgops.load(tmp(n))[2] for n in ("open", "openb", "g1"))
+        thr_f = max(3 * a.min_contrast, 8 * sigma)
+        fl = [1.0 if ok[i] and sign * (G1[i] - Op[i]) > thr_f * (a.face_factor if faces[i] > 0.5 else 1.0) else 0.0
+              for i in range(N)]
+        near = imgops.maxf([sign * v for v in Ob], w, h, 2)
+        for c in imgops.components(fl, w, h):
+            ground = sorted(sign * Ob[i] for i in c)[len(c) // 2]
+            level = sorted(sign * G1[i] for i in c)[len(c) // 2]
+            if max(near[i] for i in c) >= ground + 0.5 * (level - ground):
+                for i in c:
+                    fl[i] = 0.0
+        flakes[sign], opened[sign] = fl, Ob
+    allf = [max([flakes[s][i] for s in flakes] or [0.0]) for i in range(N)]
+
     # context: a defect is foreign to its surroundings, real detail belongs to them. Contrast against the clean ring
     # 2..6 px around it, over that ring's own spread: dust or a streak on smooth ground scores far higher than a stripe
     # on a cap, a nostril or a mouth line among the structure of a face. Repairs that rebuild a whole area (coarse
@@ -364,10 +446,18 @@ def main():
     for r in comps_out:
         for i in r["pix"]:
             cand_all[i] = 1
+
+    def near_face(pix, d=24):
+        """On a face or within d px of one (the beard, the hairline)."""
+        xs = [i % w for i in pix]; ys = [i // w for i in pix]
+        return any(faces[y * w + x] > 0.5 for y in range(max(0, min(ys) - d), min(h, max(ys) + d + 1), 2)
+                   for x in range(max(0, min(xs) - d), min(w, max(xs) + d + 1), 2))
     for r in comps_out:
-        if r["class"] == "kept":
-            continue
         pix = r["pix"]
+        in_face = sum(faces[i] for i in pix) > len(pix) / 2
+        if r["class"] == "kept" and not (r["peak"] >= 3 * a.min_contrast and (r["sign"] > 0 or not in_face)):
+            continue  # kept by shape (an edge, a lash); a strong one still gets the ring test (in a face only light
+            # flakes: lashes and brows are dark and come in rows)
         xs = [i % w for i in pix]; ys = [i // w for i in pix]
         x0, y0 = max(0, min(xs) - 7), max(0, min(ys) - 7)
         x1, y1 = min(w, max(xs) + 8), min(h, max(ys) + 8)
@@ -376,8 +466,24 @@ def main():
         for i in pix:
             sub[(i // w - y0) * bw + i % w - x0] = 1.0
         outer, inner = imgops.maxf(sub, bw, bh, 6), imgops.maxf(sub, bw, bh, 2)
-        ring = [Gy[(y0 + k // bw) * w + x0 + k % bw] for k in range(bw * bh)
-                if outer[k] and not inner[k] and not cand_all[(y0 + k // bw) * w + x0 + k % bw]]
+        around = [(y0 + k // bw) * w + x0 + k % bw for k in range(bw * bh) if outer[k] and not inner[k]]
+        ring = [Gy[j] for j in around if not cand_all[j]]
+        # dense damage: the ring is itself defective, other candidates or small flakes. Then neither the gate nor a
+        # median nor a heal can judge it, and it goes to the dense route instead of being kept (with --dense, planned
+        # ones too); unless the rest of the ring is a big area of its own tone (the edge of a white dress, which
+        # survives the wide opening).
+        if around and r["peak"] >= 3 * a.min_contrast and r["sign"] in opened and (a.dense or r["class"] == "kept"):
+            ring_bad = sum(1 for j in around if cand_all[j] or allf[j]) / len(around)
+            r["ringDefective"] = round(ring_bad, 2)
+            if ring_bad >= a.dense_ring:
+                vals = sorted(r["sign"] * Gy[j] for j in around)
+                ops = sorted(r["sign"] * opened[r["sign"]][j] for j in around)
+                level = sorted((r["sign"] * Gy[i] for i in pix), reverse=True)[max(0, len(pix) // 4 - 1)]
+                if ops[3 * len(ops) // 4] < vals[len(vals) // 4] + 0.5 * (level - vals[len(vals) // 4]):
+                    r["class"] = "dense"
+                    continue
+        if r["class"] == "kept":
+            continue
         if len(ring) < 8:
             continue
         m = sum(ring) / len(ring)
@@ -385,9 +491,147 @@ def main():
         dev = sorted((abs(Gy[i] - m) for i in pix), reverse=True)[:max(1, len(pix) // 4)]  # its core, not its halo
         r["context"] = round(sum(dev) / len(dev) / max(1.0, sd), 1)
         need = a.context if r["class"] in ("coarse", "heal", "large") else a.context / 2
+        if r["context"] < need and "sharp" in r and r["sharp"] >= 0.25 and near_face(pix) and \
+                (a.dense_polarity == "both" or (a.dense_polarity == "light") == (r["sign"] > 0)):
+            # a crisp flake on or by a face (an eyebrow, the hairline, a beard): its ring spans both, so its spread is
+            # large, but the flake stands far beyond nearly all of it (skin's own light detail is about as light as
+            # the lighter part of its ring; eyes and teeth are excluded in area.json). Away from faces sky through
+            # leaves does this too.
+            sv = sorted(r["sign"] * v for v in ring)
+            core = sorted((r["sign"] * Gy[i] for i in pix), reverse=True)[:max(1, len(pix) // 4)]
+            r["beyondRing"] = round(sum(core) / len(core) - sv[int(0.9 * (len(sv) - 1))], 1)
+            if r["beyondRing"] >= max(4 * a.min_contrast, 1.5 * sd):
+                continue
         if r["context"] < need:
             r["class"] = "kept"
+    # dense zones: candidates whose ring is itself defective (above), and where the small flakes cover --dense-share
+    # of a 41 px window in at least 6 separate pieces. With --dense every planned defect in a zone joins the dense
+    # route: a median or a Remove loop fails where most of the surroundings are damage too.
+    seeds = [0.0] * N
+    for c in imgops.components(allf, w, h):
+        if len(c) >= 3:
+            seeds[c[len(c) // 2]] = 1.0
+    dens, pieces = imgops.box(allf, w, h, 20), imgops.box(seeds, w, h, 20)
+    dz = [1.0 if dens[i] >= a.dense_share and pieces[i] * 41 * 41 >= 6 else 0.0 for i in range(N)]
+    for r in comps_out:
+        if r["class"] == "dense":
+            for i in r["pix"]:
+                dz[i] = 1.0
+    zone_of = [-1] * N
+    zones = imgops.components(imgops.maxf(dz, w, h, 8), w, h)
+    for k, comp in enumerate(zones):
+        for i in comp:
+            zone_of[i] = k
+    members = {}
+    for r in comps_out:
+        if r["class"] == "dense":
+            members.setdefault(zone_of[r["pix"][0]], []).append(r)
+    for k, comp in enumerate(zones):
+        mem = members.get(k, [])
+        from_flakes = sum(allf[i] for i in comp) >= 0.08 * len(comp) and len(comp) >= 1600
+        if not from_flakes and len(mem) < 2 and not any(m["n"] >= 200 for m in mem):
+            for m in mem:  # a lone defect with a busy ring and nothing dense round it: review it like any kept one
+                m["class"] = "kept"
+            for i in comp:
+                zone_of[i] = -1
+    for r in comps_out:  # --dense: the zone's planned defects go to its layers instead
+        if a.dense and r["class"] in ("fine", "coarse", "heal", "large") and zone_of[r["pix"][len(r["pix"]) // 2]] >= 0:
+            r["class"] = "dense"
+    own = [1] * N
+    if a.own:  # an overlapping region plans only the defects centred in the part it owns
+        X0, Y0, X1, Y1 = (int(float(v)) for v in a.own.split(","))
+        comps_out = [r for r in comps_out if X0 <= sum(i % w for i in r["pix"]) / r["n"] + a.ox < X1
+                     and Y0 <= sum(i // w for i in r["pix"]) / r["n"] + a.oy < Y1]
+        own = [1 if X0 <= i % w + a.ox < X1 and Y0 <= i // w + a.oy < Y1 else 0 for i in range(N)]
     classes = {c: [r for r in comps_out if r["class"] == c] for c in classes}
+    q = lambda v: round(min(1.0, max(0.0, v)) * 255) / 255
+
+    def clone_offset(comp):
+        """Where to clone a dense zone from: the zone moved by (dx, dy) lands on clean ground (no flakes, no other
+        candidate, no zone, no face, inside the area) of the zone's own tone and grain, as near as possible.
+        Returns (dx, dy, share of the source that isn't clean, tone difference)."""
+        sub = comp[::max(1, len(comp) // 1500)]
+        clean = [i for i in sub if not allf[i] and not cand_all[i]] or sub
+        tone = sorted(Gy[i] for i in clean)[len(clean) // 2]
+        grain = sorted(texc[i] for i in clean)[len(clean) // 2]
+        xs = [i % w for i in comp]; ys = [i // w for i in comp]
+        bx0, by0, bx1, by1 = min(xs), min(ys), max(xs), max(ys)
+        size = max(bx1 - bx0, by1 - by0) + 1
+        best = None
+        for dist in range(max(24, size // 3), 2 * size + 48, max(8, size // 6)):
+            for k in range(16):
+                dx, dy = round(dist * math.cos(math.pi * k / 8)), round(dist * math.sin(math.pi * k / 8))
+                if not (0 <= bx0 + dx and bx1 + dx < w and 0 <= by0 + dy and by1 + dy < h):
+                    continue
+                vals, texv, bad = [], [], 0
+                for i in sub:
+                    j = i + dy * w + dx
+                    if not ok[j] or zone_of[j] >= 0 or allf[j] or cand_all[j] or faces[j] > 0.5:
+                        bad += 1
+                    else:
+                        vals.append(Gy[j]); texv.append(texc[j])
+                if bad > 0.25 * len(sub):
+                    continue
+                vals.sort(); texv.sort()
+                diff = vals[len(vals) // 2] - tone
+                cost = 100 * bad / len(sub) + abs(diff) + 2 * abs(texv[len(texv) // 2] - grain) + 0.02 * dist
+                if best is None or cost < best[0]:
+                    best = (cost, dx, dy, round(bad / len(sub), 2), round(diff, 1), grain)
+        return None if best is None else best[1:]
+
+    # each zone: its box, how much of it is damaged, and (outside faces) an offset to clone it from with a Darken
+    # layer (Lighten for dark damage) masked to its defects, with a serpentine Clone Stamp stroke over it
+    dense_zones, dense_masks, dense_layers, clone_steps = [], [], [], {1: [], -1: []}
+    for k, comp in enumerate(zones):
+        if zone_of[comp[0]] != k:
+            continue
+        xs = [i % w for i in comp]; ys = [i // w for i in comp]
+        bx0, by0, bx1, by1 = min(xs), min(ys), max(xs), max(ys)
+        if a.own and not (X0 <= (bx0 + bx1) / 2 + a.ox < X1 and Y0 <= (by0 + by1) / 2 + a.oy < Y1):
+            continue
+        dmg = {s: sum(flakes[s][i] for i in comp) for s in flakes}
+        for r in classes["dense"]:
+            if zone_of[r["pix"][len(r["pix"]) // 2]] == k:
+                fl = flakes.get(r["sign"], allf)
+                dmg[r["sign"]] = dmg.get(r["sign"], 0) + sum(1 for i in r["pix"] if not fl[i])
+        sign = 1 if dmg.get(1, 0) >= dmg.get(-1, 0) else -1
+        zone = {"box": [bx0 + a.ox, by0 + a.oy, bx1 + a.ox, by1 + a.oy],
+                "damaged": round(100 * sum(dmg.values()) / len(comp), 1), "kind": "light" if sign > 0 else "dark"}
+        if sum(faces[i] for i in comp[::7]) > 0.2 * len(comp[::7]):
+            zone["face"] = True  # faces: Dust & Scratches through the mask, healing; no cloning from elsewhere
+        else:
+            off = clone_offset(comp)
+            if off and off[2] <= 0.15 and abs(off[3]) <= max(8.0, 2 * off[4]):
+                zone["cloneFrom"], zone["sourceDamaged"], zone["sourceToneDiff"] = list(off[:2]), off[2], off[3]
+                rows = list(range(by0 + 10, by1 + 1, 22))
+                if rows[-1] < by1 - 10:
+                    rows.append(by1 - 10)
+                pts = []
+                for n, y in enumerate(rows):
+                    pts += [[x + a.ox, y + a.oy] for x in ((bx0, bx1) if n % 2 == 0 else (bx1, bx0))]
+                clone_steps[sign].append({"command": "paint.cloneStamp", "params": {
+                    "points": pts, "size": 36, "hardness": 60, "offset": zone["cloneFrom"], "aligned": True,
+                    "sampleLayer": "currentAndBelow", "target": "pixels", "layer": a.layer}})
+            else:
+                zone["cloneFrom"] = None  # no clean source of its tone nearby: clone by hand
+        dense_zones.append(zone)
+    for sign, name in ((1, "dense_light"), (-1, "dense_dark")):
+        fl = flakes.get(sign)
+        m = [1.0 if fl and zone_of[i] >= 0 and fl[i] else 0.0 for i in range(N)]
+        for r in classes["dense"]:
+            if r["sign"] == sign:
+                for i in r["pix"]:
+                    m[i] = 1.0
+        if any(m):
+            m = imgops.gauss(imgops.maxf(m, w, h, 2), w, h, 0.7)  # the defects 2 px wider, edges feathered
+            m = [q(v) if ok[i] and own[i] else 0.0 for i, v in enumerate(m)]
+            if any(m):
+                imgops.save_gray(os.path.join(a.outdir, name + ".png"), w, h, m)
+                dense_masks.append(name + ".png")
+                dense_layers.append((sign, name, m))
+                if clone_steps[sign] and a.clone_plan:  # painting needs its layer active: pc.py script --layer-name
+                    json.dump([{"command": "layer.select", "params": {"layer": a.layer}}] + clone_steps[sign],
+                              open(os.path.join(a.outdir, name + ".json"), "w"))
 
     def mask_of(recs, grow_r):
         m = [0.0] * N
@@ -400,7 +644,6 @@ def main():
     # one median layer per scale, or two when the grain differs a lot between where the defects are (a negative's
     # highlights carry 2-3x the grain of its shadows): each layer's added noise replaces what its median took away
     # there, which is the local spread of that median's residual
-    q = lambda v: round(min(1.0, max(0.0, v)) * 255) / 255
 
     # the grain around each defect, from the clean pixels only (a defect would raise its own estimate)
     clean = [1.0] * N
@@ -571,9 +814,8 @@ def main():
             strokes.append((path, size, offset(path, size, pix), False, tool(pix)))
     steps, dabs = [], []
     for path, d, src, closed, how in strokes:
-        p = {"points": [[x + a.ox, y + a.oy] for x, y in path], "size": int(d), "hardness": 80, "target": "pixels"}
-        if a.layer is not None:
-            p["layer"] = a.layer
+        p = {"points": [[x + a.ox, y + a.oy] for x, y in path], "size": int(d), "hardness": 80, "target": "pixels",
+             "layer": a.layer}
         if how == "remove":
             p.update({"sampleAllLayers": True, "closeLoops": closed})
             steps.append({"command": "paint.remove", "params": p})
@@ -584,15 +826,19 @@ def main():
             p.update({"type": "contentAware", "sampleAllLayers": True})
             steps.append({"command": "paint.spotHealing", "params": p})
         dabs += [(x, y, d, src) for x, y in path]
-    json.dump(steps, open(os.path.join(a.outdir, "heal.json"), "w"))
+    # painting needs its layer active (a group or an adjustment on top refuses it): select it first. The id is
+    # --layer's, or null for `pc.py script heal.json --layer-name Heal` to fill in
+    json.dump([{"command": "layer.select", "params": {"layer": a.layer}}] + steps if steps else [],
+              open(os.path.join(a.outdir, "heal.json"), "w"))
 
     # verify window: the 640 px square with the most masked pixels, rendered exactly like the two stamp layers
     ww, wh = min(w, a.window), min(h, a.window)
     B = 16  # masked pixels per 16 px block, then the best window of blocks
     bw_, bh_ = (w + B - 1) // B, (h + B - 1) // B
     blk = [0.0] * (bw_ * bh_)
+    dense_any = [max(dl[2][i] for dl in dense_layers) for i in range(N)] if dense_layers and a.dense else [0.0] * N
     for i in range(N):
-        if mfine[i] or mcoarse[i]:
+        if mfine[i] or mcoarse[i] or dense_any[i]:
             blk[(i // w) // B * bw_ + (i % w) // B] += 1
     best, bx, by = -1, 0, 0
     nx, ny = max(1, ww // B), max(1, wh // B)
@@ -601,7 +847,7 @@ def main():
             s = sum(blk[y * bw_ + x] for y in range(y0, min(bh_, y0 + ny)) for x in range(x0, min(bw_, x0 + nx)))
             if s > best:
                 best, bx, by = s, min(x0 * B, w - ww), min(y0 * B, h - wh)
-    m = a.coarse + 2  # margin so the medians at the window's edge see the same pixels as in the whole photo
+    m = max(a.coarse, math.ceil(ds_r)) + 2  # margin so the filters at the window's edge see the same pixels as in the whole photo
     ex0, ey0 = max(0, bx - m), max(0, by - m)
     ex1, ey1 = min(w, bx + ww + m), min(h, by + wh + m)
     ew, eh = ex1 - ex0, ey1 - ey0
@@ -623,11 +869,25 @@ def main():
     pngio.write(tmp("w1"), ew, eh, P1)
     run("run", tmp("w1"), *med(a.coarse), "--out", tmp("wc"))
     P2 = blend(P1, pngio.read(tmp("wc"))[2], mcoarse)
+    for sign, name, dm in (dense_layers if a.dense and ds_r > 0 else []):  # Dust & Scratches through the dense masks
+        pngio.write(tmp("w2"), ew, eh, P2)
+        run("run", tmp("w2"), "--cmd", "filter.noise.dustAndScratches", "--params", json.dumps(ds), "--out", tmp("wd"))
+        pick = min if sign > 0 else max
+        P2 = blend(P2, [[tuple(pick(p[c], d[c]) for c in range(3)) for p, d in zip(rp, rd)]
+                        for rp, rd in zip(P2, pngio.read(tmp("wd"))[2])], dm)
     vx, vy = bx - ex0, by - ey0
     pngio.write(os.path.join(a.outdir, "preview.png"), ww, wh, [row[vx:vx + ww] for row in P2[vy:vy + wh]])
 
+    region = (f"{X0},{Y0}-{X1},{Y1}" if a.own else f"{a.ox},{a.oy}-{a.ox + w},{a.oy + h}")
+    group = a.group or ("Dust & scratches" if (a.ox, a.oy) == (0, 0) and not a.own else f"Dust & scratches ({region})")
+    suffix = "" if group == "Dust & scratches" else f" ({region})"  # unique names, for pc.py script --layer-name
+    clone_name = {1: f"Clone light, Darken{suffix}", -1: f"Clone dark, Lighten{suffix}"}
     layers = {"center": [a.ox + w / 2, a.oy + h / 2], "crop": [a.ox + bx, a.oy + by, ww, wh], "preview": "preview.png",
-              "group": "Dust & scratches", "layers": []}
+              "group": group, "layers": []}
+    # a Stamp Visible covers the whole canvas: clear it outside this crop, so a PSD of many regions doesn't carry a
+    # full-size copy per layer (the mask is black there anyway, so the render is the same)
+    trim = [["select.rect", {"x": a.ox, "y": a.oy, "width": w, "height": h}], ["select.inverse", {}], ["edit.clear", {}],
+            ["select.deselect", {}]]
     noise = 0.0  # the preview has no grain: the render differs by the added noise under the masks, E|N(0, s)| = 0.8 s
     for k, (cls, radius, fname, m, grain) in enumerate(median_layers):
         stamp = [["filter.noise.median", {"radius": radius}]]
@@ -635,7 +895,18 @@ def main():
             stamp.append(["filter.noise.addNoise", {"amount": round(grain / NOISE_PER_AMOUNT, 2), "distribution": "gaussian",
                                                     "monochromatic": True, "seed": k + 1}])
             noise += 0.8 * grain * sum(m[(by + y) * w + bx + x] for y in range(wh) for x in range(ww)) / (ww * wh)
-        layers["layers"].append({"name": f"{cls.capitalize()} (median {radius}, grain {grain:.1f})", "stamp": stamp, "mask": fname})
+        layers["layers"].append({"name": f"{cls.capitalize()} (median {radius}, grain {grain:.1f})", "stamp": stamp + trim,
+                                 "mask": fname})
+    # dense damage: Dust & Scratches through its mask in Darken (light damage) or Lighten (dark), which only lowers
+    # (raises) the defects, then an empty layer with the same mask and mode for Clone Stamp strokes (dense_light.json)
+    for sign, name, dm in (dense_layers if a.dense and ds_r > 0 else []):
+        mode, kind = ("Darken", "light") if sign > 0 else ("Lighten", "dark")
+        layers["layers"].append({"name": f"Dense {kind} (Dust & Scratches {ds_r:g}/{ds_t:g}, {mode})",
+                                 "stamp": [["filter.noise.dustAndScratches", ds]] + trim, "mask": name + ".png", "blend": mode})
+    for sign, name, dm in (dense_layers if a.dense else []):
+        mode, kind = ("Darken", "light") if sign > 0 else ("Lighten", "dark")
+        layers["layers"].append({"name": clone_name[sign], "stamp": [["select.all", {}], ["edit.clear", {}], ["select.deselect", {}]],
+                                 "mask": name + ".png", "blend": mode})
     layers["tolerance"] = round(0.5 + 1.25 * noise, 2)
     json.dump(layers, open(os.path.join(a.outdir, "layers.json"), "w"), indent=1)
 
@@ -643,7 +914,17 @@ def main():
     S = 2
     _, _, PC = pngio.read(tmp("g"))
     img = [[PC[y // S][x // S] for x in range(w * S)] for y in range(h * S)]
-    colours = {"fine": (40, 220, 40), "coarse": (255, 220, 0), "kept": (60, 140, 255), "heal": (255, 60, 60), "large": (255, 0, 255)}
+    colours = {"fine": (40, 220, 40), "coarse": (255, 220, 0), "kept": (60, 140, 255), "heal": (255, 60, 60), "large": (255, 0, 255),
+               "dense": (255, 140, 0)}
+    for sign, name, dm in dense_layers:  # what the dense layers touch: tinted orange (light damage) or violet (dark)
+        tint = colours["dense"] if sign > 0 else (170, 90, 255)
+        for i, v in enumerate(dm):
+            if v > 0.5:
+                x, y = i % w, i // w
+                for dy in range(S):
+                    for dx in range(S):
+                        p = img[y * S + dy][x * S + dx]
+                        img[y * S + dy][x * S + dx] = tuple((p[c] + tint[c]) // 2 for c in range(3))
     for r in comps_out:
         col = colours[r["class"]]
         sp = set(r["pix"])
@@ -661,6 +942,14 @@ def main():
             for y in range(min(ys) * S, max(ys) * S + S):
                 for x in (min(xs) * S, max(xs) * S + S - 1):
                     img[y][x] = col
+    for z in dense_zones:  # dense zones: orange boxes
+        zx0, zy0, zx1, zy1 = z["box"][0] - a.ox, z["box"][1] - a.oy, z["box"][2] - a.ox, z["box"][3] - a.oy
+        for x in range(zx0 * S, zx1 * S + S):
+            for y in (zy0 * S, zy1 * S + S - 1):
+                img[y][x] = colours["dense"]
+        for y in range(zy0 * S, zy1 * S + S):
+            for x in (zx0 * S, zx1 * S + S - 1):
+                img[y][x] = colours["dense"]
     for cx, cy, d, src in dabs:
         rad = d / 2 * S
         for t in range(0, 360, 8):
@@ -668,8 +957,9 @@ def main():
             if 0 <= px < w * S and 0 <= py < h * S:
                 img[py][px] = colours["heal"]
     pngio.write(os.path.join(a.outdir, "overlay.png"), w * S, h * S, img)
-    for n in ("g", "mf", "mc", "ms", "ms2", "w", "wf", "w1", "wc", "res", "line", "abs", "absm"):
-        os.remove(tmp(n))
+    for n in ("g", "mf", "mc", "ms", "ms2", "w", "wf", "w1", "wc", "res", "line", "abs", "absm", "open", "openb", "g1", "w2", "wd"):
+        if os.path.exists(tmp(n)):
+            os.remove(tmp(n))
 
     count = lambda c: len(classes[c])
     stats = {"crop": [a.ox, a.oy, w, h], "grain": round(sigma, 2),
@@ -678,7 +968,14 @@ def main():
              "medianLayers": [l["name"] for l in layers["layers"]],
              "large": [[min(i % w for i in r["pix"]) + a.ox, min(i // w for i in r["pix"]) + a.oy,
                         max(i % w for i in r["pix"]) + a.ox, max(i // w for i in r["pix"]) + a.oy] for r in classes["large"]],
-             "verifyWindow": layers["crop"]}
+             "dense": dense_zones, "denseMasks": dense_masks, "group": group, "verifyWindow": layers["crop"]}
+    if dense_zones and not a.dense:
+        stats["denseNote"] = (f"{len(dense_zones)} dense zone(s), planned as usual: check them in overlay.png (orange) and "
+                              "run again with --dense for the dense route (references/restore.md, Step 4)")
+    if dense_layers and a.dense:
+        stats["cloneLayers"] = [{"layer": clone_name[sign], "mask": name + ".png",
+                                 "plan": f"{name}.json" if clone_steps[sign] and a.clone_plan else None}
+                                for sign, name, _ in dense_layers]
     bbox = lambda p: [min(i % w for i in p) + a.ox, min(i // w for i in p) + a.oy, max(i % w for i in p) + a.ox, max(i // w for i in p) + a.oy]
     json.dump({**stats, "defects": [{**{k: v for k, v in r.items() if k != "pix"}, "bbox": bbox(r["pix"])} for r in comps_out]},
               open(os.path.join(a.outdir, "defects.json"), "w"))

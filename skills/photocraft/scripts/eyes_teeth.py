@@ -214,7 +214,7 @@ def solve_curves(pix, target, space, fixed_iters=3):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("crop"); ap.add_argument("ox", type=int); ap.add_argument("oy", type=int)
     ap.add_argument("regions"); ap.add_argument("outdir")
     ap.add_argument("--space", choices=("srgb", "p3"), default="srgb", help="the photo's RGB space, for Lab")
@@ -564,8 +564,9 @@ def main():
     if any(m_veins):  # how much redder (R-G) than the clean white around them the veins are
         idx = [i for i in range(N) if m_veins[i] > 0.3]
         base = [ref_img[0][i] - ref_img[1][i] for i in idx]
-        vein_red = {"before": round(sum(R[i] - G[i] - b_ for i, b_ in zip(idx, base)) / len(idx), 1),
-                    "afterVeinLayer": round(sum(out_v[0][i] - out_v[1][i] - b_ for i, b_ in zip(idx, base)) / len(idx), 1)}
+        if idx:  # a mask that never passes 0.3 (faint veins) has nothing to measure
+            vein_red = {"before": round(sum(R[i] - G[i] - b_ for i, b_ in zip(idx, base)) / len(idx), 1),
+                        "afterVeinLayer": round(sum(out_v[0][i] - out_v[1][i] - b_ for i, b_ in zip(idx, base)) / len(idx), 1)}
 
     def hard_edge(m):
         st = 0.0
