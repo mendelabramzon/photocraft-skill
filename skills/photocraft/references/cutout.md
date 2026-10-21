@@ -3,14 +3,16 @@
 Read this before cutting a subject out of its background or making a marketplace product image. It is the full
 version of the recipe in SKILL.md: how clipping-path studios and e-commerce retouchers work, and how to do the same
 in PhotoCraft with `cutout_check.py` (judges the cut, builds the edge-colour layers, checks the deliverable),
-`channel_mask.py` (the channel route for hair and fur), `product_shot.py` (shadow, reflection, glass, backdrop and
-canvas) and `specs.py` (marketplace specifications, read by both).
+`channel_mask.py` (the channel route for hair and fur), `hair_strands.py` (a hair or fur edge contracted and its
+strands revealed and painted back), `product_shot.py` (shadow, reflection, glass, backdrop and canvas) and
+`specs.py` (marketplace specifications, read by both).
 
 ## Contents
 - What separates a professional cutout from a cheap one
 - The layer stack you're building
 - Step 1: set up and choose the spec
 - Step 2: select by edge type
+- Hair and fur edges: contract, reveal, paint strands
 - Step 3: check the cut
 - Step 4: fix the edge colour
 - Step 5: shadow, reflection, backdrop and canvas
@@ -33,6 +35,11 @@ canvas) and `specs.py` (marketplace specifications, read by both).
 - **Hair: the channel route when Refine fails.** Select and Mask fails where the backdrop is close to the hair's
   colour (Adobe Community); retouchers then mask from the R, G or B channel with the most strand-to-backdrop
   contrast, crushed toward black and white (PHLEARN, Planet Photoshop). `channel_mask.py` does that per pixel.
+- **A hair edge is finished by hand, with strands.** Adobe's own tutorials end a Select and Mask cut the same way:
+  check it On Black, contract the mask with Minimum so the fuzzy rim of old backdrop goes in under the hair, then
+  paint strands back, white on the mask with a strand brush following the growth direction (fur) and new strands
+  on a layer under the subject in several sampled hair colours, blurred 1 px (hair). One colour, or strands
+  sticking straight out, read as fake. `hair_strands.py` does it by measurement.
 - **Fix the edge's colour, not only the mask.** A halo is backdrop colour trapped in edge pixels. Decontaminate
   Colors at full strength looks overprocessed and bakes its result in (PHLEARN); the forum experts' "far more
   controllable" alternative is a layer clipped to the cutout in Color mode painted with the subject's edge colour,
@@ -94,6 +101,7 @@ layer visible), never from `cli convert photo.jpg`. Lens fringing is fixed on th
 | White product, or a blown backdrop | `select.magicWand {"x": 5, "y": 5, "tolerance": 8, "contiguous": true}` + `select.inverse {}`, or `select.object {"rect": [0, 0, W, H]}` (select.subject took only the grey parts of a white controller) | as above |
 | Hair, fur on a contrasting backdrop | `select.subject {}` | `{"radius": 8, "smartRadius": true, "output": "newLayerWithMask"}`, then the edge colour (Step 4). `"decontaminate": true, "amount": 100` in the same step is the quick, baked-in option (on a kitten it took the fringe on black from p95 27 to 2.8; radius 16 overshot) |
 | Hair against a backdrop close in colour, or where Refine leaves a blobby or grey outline | the refined cut above as the rough cut | `channel_mask.py` (below) |
+| Hair or fur that Refine left as a soft helmet with a light rim, or with its strands cut off | the refined (or channel) cut | `hair_strands.py` ("Hair and fur edges" below) |
 | Glass, clear plastic | a cut of its outline (`select.subject`, or a traced `select.lasso`) | `product_shot.py --transparent` replaces the opaque cut |
 | Mixed (a model with loose hair, a product with fur trim) | both | the hard route, then channel_mask.py with `--area` round the soft part |
 
@@ -159,6 +167,102 @@ over itself always matches: the mask is judged with cutout_check.py on `chan/cut
   0.074). Loose or frizzy hair: 20–40.
 
 The strands it finds still carry the backdrop's colour: always run Step 4 on its cut.
+
+## Hair and fur edges: contract, reveal, paint strands
+
+Adobe finishes a Select and Mask hair cut by hand in its own tutorials ("Select and mask hair"; "Use AI to mask
+faster, then refine like a pro"): refine the mask and look at it On Black, contract it with Filter > Other > Minimum
+(about 6 px on a high-res bear) so the fuzzy rim of old backdrop goes in under the hair, then paint strands back:
+white on the mask with a strand-shaped brush whose angle follows the stroke, short strokes along the growth
+direction (fur), and new strands on a layer below the subject, colours sampled from the hair, several of them, and
+Gaussian Blur 1 px to match the depth of field (hair). PhotoCraft does the refine and the Minimum; `hair_strands.py`
+does the strands by measurement, and `apply` writes its mask into the cut layer's own mask.
+
+**1. Refine, and look On Black and On White.** Select and Mask's global sliders are `select.refineEdge` params.
+Measured on the kitten with `cutout_check.py --kind soft` (radius 8, smart radius; edge 6.6 px, light rim on black
+p95 4.5, `cutInto` 0.125, `backdropInside` 0.029):
+
+| Param | What it did |
+|---|---|
+| `"smooth": 20` | edge 4.3 px and no haze, but the strands smoothed away: rim on black p95 18.6 |
+| `"contrast": 30` | the same, milder: edge 5.0 px, rim 13.1 |
+| `"feather": 1` | next to nothing (edge 6.9 px, rim 4.3) |
+| `"shiftEdge": -10` / `10` | the whole outline 1 px in / out (whole pixels, shoulders too): `cutInto` 0.5 / `backdropInside` 0.16 |
+
+So on hair leave smooth, contrast and shiftEdge at 0: they trade strands for a clean line, which is right for a
+product. (Adobe's own tutorial says drag Shift Edge right in its text and left in its video; in PhotoCraft negative
+is inward.) Look at the cut on black and on white, `sheet.png` from Step 3 or from the planner below: a light rim
+shows on black, a dark one on white.
+
+**2. Contract.** By hand, Minimum on the mask, only round the hair:
+
+    select.lasso {"points": [[x, y], …]}                          # the hair zone; select.rect for a box
+    view.layerMask {"layer": <cut id>, "mode": "gray"}            # filters act on the mask while it is shown
+    filter.other.minimum {"radius": 2}
+    view.layerMask {"layer": <cut id>, "mode": "off"}
+    select.deselect {}
+
+Without the `view.layerMask` step, Minimum ran on the layer's pixels (it darkened the photo) and left the mask as it
+was, and still returned `ok`. With it, only the mask changed, only inside the selection, and exactly by a square
+minimum of that radius (tested headless: 0 levels off a computed one). `hair_strands.py` contracts by itself: give it
+the cut before any Minimum.
+
+**3. Plan the strands.**
+
+    # orig.png, cut.png: the same even-sized crop round the hair (Step 3's exports), the cut with the Background hidden
+    python3 hair_strands.py orig.png cut.png X Y hair.json strands/ [--mode both|reveal|paint] [--background #hex]
+
+`hair.json` (`grid.py`): `"hair"` = a polygon round the hair's outline reaching 40-60 px out over the backdrop and
+ending inside the crop, `"exclude"` = the face below the hairline, ears, glasses, an earring. It measures the soft
+rim's width, how far the photo's own faint strands reach past the cut (`strandReach`), the hair's direction (a
+structure tensor of unit gradients, from inside the hair and from those faint strands, so strands sticking out of
+combed hair set it, the silhouette never does), the clean backdrop and the hair colour behind every edge pixel.
+Then, along the contracted edge (`--contract`, auto: half the soft rim, 1-6 px):
+
+- **reveal** (fur brush): 4 px strokes from roots 1-4 px inside the edge, along the hair's direction, 30 per 100 px of
+  edge, as long as `strandReach` x 1.2. Under a stroke the mask takes the photo's own coverage there (the matting
+  estimate against backdrop and hair colour), only on thin pixels or at the hair's own edge: the photo's strands come
+  back at their real opacity, the backdrop between them and a smooth shadow on it stay out.
+- **paint** (hair brush): 8 strands per 100 px, 1.2 px at the root thinning to a tip, `strandReach` x 1.5 long
+  (14-60 px), each coloured from the hair at its root mixed with a nearby tone of a 4-tone palette, blurred like the
+  photo's isolated strands but at most 1 px. Roots where the hair shows no direction (coherence under 0.2) get no
+  painted strand: there it would be a spike.
+
+Read `sheet.png` (before | after on black, then on `--background`: the new background's colour) and `viz.png`
+(yellow = old edge, orange = contracted, green = revealed strokes, red = painted strands, blue = roots with no
+direction). Then a 2-3x crop of the edge on the new background.
+
+**4. Apply and import.**
+
+    python3 hair_strands.py apply strands/ <cut layer id or name>         # headless: --file cut.psd --save out.psd
+    $PC exec layer.setProps '{"layer": <Background id>, "visible": true}'  # the import's verify renders over it
+    python3 import_layers.py strands/layers.json --above <Background id>  # "Strands (painted)", under the cut
+
+`apply` pastes `mask.png` into the cut layer's own mask at the crop (`edit.copy` from the PNG, then
+`edit.paste {"target": "mask", "center": [cx, cy]}`): the mask outside the crop stays, the layer's pixels stay the
+photo's own, and it lands exactly (headless: 0 levels off the plan inside the crop, 0 outside). Loading the PNG as a
+selection instead (the way import_layers loads masks) converted it on an Apple RGB portrait, mid-greys up to 19 levels
+darker. Live, it goes through the app's clipboard (tested headless only). The painted strands go under the cut, as in Adobe's tutorial, so
+they show only past its mask; hide the Background again afterwards. The import verified exactly on the sRGB kitten
+(mean 0.0) and "ok" (0.006) on the Apple RGB portrait, whose strands may shift a few levels (no builtin twin).
+
+**5. Edge colour and checks.** Revealed strands carry the old backdrop's colour like any soft edge: Step 4 on the
+new cut, `cutout_check.py strands/cut.png strands/orig.png check/ --kind soft --edge-fix --origin X Y`, then
+`import_layers.py check/edgefix/layers.json --above <cut id>`. On the final background, `qc.py seams final.png
+strands/cut.png <dir> --origin X Y --composite` compares grain and sharpness across the edge (a flat test colour has
+nothing to compare).
+
+Tested on a studio portrait (dark short hair on light grey, 162 levels of contrast) and a grey tabby kitten on a
+light floor, both cut with radius 8 + smart radius, about 0.8 MP crops, 22-25 s each on Python 3.9:
+- Kitten: contracted 2 px, 677 revealed strokes and 144 painted strands (37 roots skipped, no direction);
+  `backdropInside` 0.029 → 0.006, `cutInto` 0.125 → 0.06; after Step 4 the fringe was p95 0.3 everywhere on both. On
+  dark the ear tips got fine wisps where the cut had a light rim.
+- Portrait: contracted 2 px, 420 revealed, 99 painted; the light specks the cut left on blue went, a few fine
+  flyaways came back on white and blue. `cutInto` went 0.002 → 0.097 (the contraction, still under soft's 0.2); after
+  Step 4 the fringe on black p95 2.1 → 0.4.
+- The matched blur was 1.25 px (portrait) and 2.0 px (kitten), but strands that soft looked like smoke at 2x: the
+  statistic also falls with a strand's width, and the photo's finest strands are thinner than a painted one. So the
+  default stops at Adobe's 1 px; `--blur` for a really soft photo.
 
 ## Step 3: check the cut
 
@@ -436,6 +540,13 @@ A third-party number (Amazon's, Etsy's) is worth checking against the marketplac
 | channel_mask: haze along the floor under fur or feet | the contact shadow reads as half-transparent fur where it isn't smooth | `--area` round the hair or fur away from the floor; keep the rough cut there |
 | channel_mask: warning "only N levels between the hair and the backdrop" | grey or blonde hair on a light backdrop, or a backdrop the hair's colour | keep the soft Refine Edge result, paint the outline by hand, or reshoot on a contrasting backdrop |
 | channel_mask: holes in the hair near the edge | highlights read as transparent in one channel | they fill from half the band inside the rough edge; a wider `--band`, or paint the mask |
+| Minimum on the cut changed the photo, not the mask (still `ok`) | filters act on the layer's pixels unless its mask is shown | `view.layerMask {"mode": "gray"}` first, `"off"` after (step 2 of "Hair and fur edges") |
+| hair_strands: painted strands look like smoke or soft smudges | a blur over 1 px, or very long strands | the default caps the blur at 1 px; `--blur 0.5`, a shorter `--length` |
+| hair_strands: strands stick straight out like spikes | the hair shows no direction there (blue roots in viz.png, the warning) | none are painted where it measured none; where the direction is weak, lower `--follow` (the outward bias, 0.5), or `--mode reveal` |
+| hair_strands: dark strands on a light edge (or the reverse) | a palette tone far from the root's colour | tones are picked near the root's; lower `--colors`, or draw the zone round one colour of hair |
+| hair_strands: the hair looks cut into after it | the contraction (`cutInto` up, 0.002 → 0.1 on short hair) | `--contract 1`, or `--contract 0` with `--mode paint` |
+| hair_strands: a step in the mask at the crop's edge (the warning) | the hair's edge leaves the crop inside the zone: the mask is new inside the crop only | crop wider, or end the zone 10 px inside the crop |
+| hair_strands: strands cross the face or an ear | the zone reaches over them | `"exclude"` polygons round the face below the hairline, ears and glasses |
 | Grey haze under the product on a coloured background | the contact shadow went into the mask | subtract it from the selection before refining |
 | Soft, slightly blurred product edge (width ~3 px) | refine without contrast | `refineEdge` radius 1, contrast 25 |
 | White blob between legs on a coloured background | `select.quick` flooded into a white backdrop | trace with `select.lasso` |

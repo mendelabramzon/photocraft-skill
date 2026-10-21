@@ -186,6 +186,16 @@ balance changes every colour decision after it.
 4. Look at every photo on sheets again, then export with a naming template. Ratings and flags live in
    the library: headless, tell the user which photos you picked, and write XMP sidecars only if they ask.
 
+### Underwater and hazy photos: subject neutral, water blue (`references/develop.md`)
+
+1. `develop.wbPick` on something grey at the subject's distance (a grey shark, a tank, sand), never on blue
+   or green life; measure it neutral. The reef's reds come back and open water turns grey-violet.
+2. Water back to blue with a `linear` mask from the top to below the far seabed (`temp` −70, `tint` −30,
+   `saturation` +20, `dehaze` +20, `exposure` −0.15), then `mixer.purple.hue` −100, `mixer.blue.hue` −40.
+3. Whites up, blacks down, `effects.dehaze` +15; a `radial` per subject with contrast, texture, clarity
+   and dehaze +15 to +20 (the heuristic `subject` mask is a centred oval on such scenes); `spot.findDust`
+   for backscatter, each spot checked at 100 %.
+
 ### Quick looks: presets and profiles
 
 `$LC exec presets.list` lists 41 built-in looks (`lc.teal-orange`, `lc.bw-selenium`, `lc.moody`…);
@@ -280,7 +290,7 @@ second set of settings for the same file. `develop.reset` clears a photo's edits
 - `references/no-app.md`: working without the desktop app (Linux servers, Claude app chats, Managed
   Agents): `install_cli.py`, where files come from and go, looking at your work, delivering.
 - `references/develop.md`: developing a photo the way professionals do: order, numbers to aim for,
-  masks and how to check them, and the looks and mistakes clients notice.
+  masks and how to check them, underwater and hazy scenes, and the looks and mistakes clients notice.
 - `references/shoot.md`: a whole shoot: assisted culling, contact sheets, matching and syncing settings,
   export recipes for web, social, print and clients.
 - Scripts (Python 3 standard library only): `lc.py` (control channel and CLI helper), `look.py`

@@ -198,6 +198,10 @@ separation and a finer D&B pass. Say what the tier leaves alone.
    "bruise". It touches only blotch-scale tone, never pores or light, and only inside an area drawn
    around the marks. Check `viz.png`, `preview.png` and `compare.py --marks`, then
    `scripts/import_masks.py` builds the group in the live document and verifies nothing shifted.
+   **Lines and under-eye** (commercial and up, age kept): `scripts/soften_lines.py face.png X Y area_lines.json <dir>
+   --face-width W` fills crow's feet, forehead and neck lines, folds and the tear-trough shadow on their own layers at
+   partial opacity (lines 0.5, under-eye 0.4, folds 0.3; never 1.0), texture kept. Zones off eyes, lashes, brows, lips
+   and glasses frames; plan it last, on an export; `import_layers.py <dir>/layers.json`.
 4. **Flyaways** (commercial and up, plain backdrop): `scripts/flyaways.py crop.png X Y area.json <dir>
    --keep 12` paints the backdrop over stray strands and keeps the ones near the hair (helmet hair looks
    fake). Check `viz.png`, then `import_layers.py <dir>/layers.json`.
@@ -273,11 +277,22 @@ adapt to a cast within seconds.
 3. **Look.** The tested looks in the doc (Color Lookup tealOrange at 40 %, a Luminosity S-curve, a
    Gradient Map split tone in Soft Light at 0.3, a #4B4B4B Lighten matte, Vibrance not Saturation; a Lab
    colour boost only in a `.pcraft`, since PSD breaks Lab curves), then local contrast kept off skin:
-   `color_check.py clarity now.png <dir> --skin skin.json`. Black & white through a Black & White layer
+   `color_check.py clarity now.png <dir> --skin skin.json`; or Texture, Clarity and sharpening on the subject only:
+   `filter.cameraRaw` on a smart object while `select.subject` minus the skin is active (the selection becomes the
+   filter mask; "Finish the subject" in the doc). Black & white through a Black & White layer
    with subject weights, never desaturate.
 4. **Check.** `color_check.py compare before.png after.png --neutral … --skin …`: neutrals |a*|,
    |b*| ≤ 2; skin at 110–130° on the vectorscope, a* and b* positive, about 10–30, b* near a*, and moved
    ≤ 5° by the look; no new clipping. The same light gets the same layers.json on every photo.
+
+### Recipe: change one colour, a garment or a product colourway (`references/color-grade.md`, "Change one colour")
+
+Adobe's Adjust Colors, measured: one Hue/Saturation layer whose colour range is narrowed off skin, masked to the object.
+1. `scripts/recolor.py colors photo.jpg <dir>` lists the prominent colours; draw `area.json` with `grid.py`, its
+   exclude polygons hugging patches, logos and faces (a near-grey object also gets `--mask` from `select.subject`).
+2. `recolor.py plan photo.jpg area.json <dir> --target '#hex' [--point X,Y]`: a range or Colorize, solved to ΔE00 ≤ 2;
+   read the warnings and `before_after.png`, `import_layers.py <dir>/layers.json`, then `recolor.py check` on an export.
+   Lightness moves past ~25 L* (to white, black to a colour) blow or flatten the shading: say so, don't fake a colourway.
 
 ### Recipe: cutouts and product photos on white (read `references/cutout.md` first)
 
@@ -304,6 +319,17 @@ adapt to a cast within seconds.
 5. **Deliverable.** JPEG via `$PC cli convert … --quality 95`, then `cutout_check.py --deliverable x.jpg
    <dir> --spec <ps>/spec.json`: `pass`, or the `failed` checks (backdrop, size, exact aspect, fill range,
    centring, file type and size, sRGB).
+
+### Recipe: hair and fur edges after the cut (`references/cutout.md`, "Hair and fur edges")
+
+Adobe's finish for a Select and Mask cut: contract the mask, then strands back along the growth direction.
+1. Refine for hair (step 2 above; leave smooth, contrast and shiftEdge at 0 on hair) and look on black and white.
+   By hand, Minimum hits the mask only while it's shown: `view.layerMask {"mode": "gray"}`, `filter.other.minimum`,
+   `"off"`; otherwise it runs on the photo and still says `ok`.
+2. `scripts/hair_strands.py orig.png cut.png X Y hair.json <dir>` (the uncontracted cut; a zone round the outline,
+   face and ears excluded) contracts, reveals the photo's own strands and paints new ones. Read `sheet.png`, `viz.png`.
+3. `hair_strands.py apply <dir> <cut layer>` pastes the new mask in; `import_layers.py <dir>/layers.json --above
+   <Background id>` (Background visible); then step 3's `--edge-fix` on `<dir>/cut.png`.
 
 ### Recipe: composite an element into another photo (read `references/composite.md` first)
 
@@ -467,18 +493,21 @@ make a new document and leave the original untouched.
   Agents): `install_cli.py`, where files come from and go, the headless form of each live step, looking
   at your work, the 30 MB download limit in chats.
 - One guide per workflow in `references/`, with its scripts (Python 3 standard library only, in `scripts/`):
-  - `skin-retouch.md`: tiers, healing, frequency separation, dodge & burn and colour, flyaway hair.
-    `plan_heals.py`, `skin_masks.py`, `import_masks.py`, `freqsep.py`, `flyaways.py`.
+  - `skin-retouch.md`: tiers, healing, frequency separation, dodge & burn and colour, lines and under-eye
+    softened at partial opacity, flyaway hair. `plan_heals.py`, `skin_masks.py`, `import_masks.py`, `freqsep.py`,
+    `soften_lines.py`, `flyaways.py`.
   - `feature-swap.md`: closed eyes (or a smile, a head) from another frame: donor, alignment, tone, mask,
     checks, and the feedback each mistake drew. `feature_swap.py` (`donors`, `align`, `mask`, `tone`).
   - `eyes-teeth.md`: teeth whitening, eye whites, iris, catchlights, red-eye. `eyes_teeth.py`.
   - `color-grade.md`: white balance from neutrals (clipped whites and blacks too), black and white points
     for screen or print, skin by Lab and vectorscope, tested looks, local contrast off skin, matching
-    shots, black & white, colour management. `color_check.py` (`measure`, `correct`, `chart`, `match`,
-    `clarity`, `compare`).
+    shots, black & white, a masked Camera Raw finish, changing one colour (garments, product colourways), colour
+    management. `color_check.py` (`measure`, `correct`, `chart`, `match`, `clarity`, `compare`), `recolor.py`
+    (`colors`, `plan`, `check`).
   - `cutout.md`: edge-type routing (the channel route, glass), edge-colour layers, contact, real and
     reflection shadows, marketplace presets and client specs, deliverable checks, product cleanup.
-    `cutout_check.py` (cut, `--edge-fix`, `--deliverable`), `channel_mask.py`, `product_shot.py`, `specs.py`.
+    `cutout_check.py` (cut, `--edge-fix`, `--deliverable`), `channel_mask.py`, `product_shot.py`, `specs.py`;
+    hair and fur edges (contract, reveal and paint strands): `hair_strands.py` (plan, `apply`).
   - `composite.md`: an element into another photo: tones in the compositors' order, the colour of the
     light, grain, sharpness, light wrap, contact shadow, seams. `composite.py`.
   - `object-removal.md`: dust, wires, people and objects; tool routing, donors, masked Dust & Scratches,

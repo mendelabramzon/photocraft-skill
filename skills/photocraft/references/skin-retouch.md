@@ -11,6 +11,7 @@ retouchers work, and how to do the same in PhotoCraft with the planning scripts.
 - Step 2: heal the blemishes (texture)
 - Step 2b (beauty and hero shots): frequency separation
 - Step 3: dodge & burn and colour evening (tone and colour)
+- Step 3b: soften lines, folds and under-eye shadows (age kept)
 - Step 4: flyaway hair
 - Step 5: check like a retoucher
 - Step 6: save
@@ -69,15 +70,20 @@ Ask which one the user wants, or infer it from the use, and say what the tier le
 
 | Tier | For | Steps | Settings |
 |---|---|---|---|
-| Light | headshots, weddings, events, volume | Step 2 (1-2 passes), eyes and teeth subtle, Step 5 at 1x and 2x | temporary blemishes only; `--whiten 0.25` on teeth |
-| Commercial | brand and corporate portraits, ads, lookbooks | Light + the whitehead pass, Step 3, Step 4, eyes and teeth in full, the check views | D&B strength 0.7-0.85; flyaways `--keep 12` |
-| Beauty / hero | beauty, editorial covers, hero ad images | Commercial + Step 2b, a second, finer D&B pass, check layers in the document, eyes sharpened | FS at the measured radius; D&B `--sigma` 0.7x on the second pass; flyaways `--keep 6-8` |
+| Light | headshots, weddings, events, volume | Step 2 (1-2 passes), eyes and teeth subtle, Step 5 at 1x and 2x | temporary blemishes only; `--whiten 0.25` on teeth; lines left (Step 3b only if asked, lines 0.3) |
+| Commercial | brand and corporate portraits, ads, lookbooks | Light + the whitehead pass, Step 3, Step 3b, Step 4, eyes and teeth in full, the check views | D&B strength 0.7-0.85; lines 0.4-0.5, under-eye 0.3-0.4, folds 0.2-0.3; flyaways `--keep 12` |
+| Beauty / hero | beauty, editorial covers, hero ad images | Commercial + Step 2b, a second, finer D&B pass, check layers in the document, eyes sharpened | FS at the measured radius; D&B `--sigma` 0.7x on the second pass; lines up to 0.6-0.7, under-eye 0.5, never 1.0; flyaways `--keep 6-8` |
 
-Every tier keeps the person: identity, moles, freckles, smile lines and the face's shape.
+Every tier keeps the person: identity, moles, freckles, smile lines and the face's shape. Lines are softened,
+never erased: a face with no lines at all reads as somebody else.
 
 ## The layer stack you're building
 
     Flyaways (keep 12 px)         pixel layer = clean backdrop + grain, mask = stray strands (Step 4)
+    Soften lines                  group, Pass Through (Step 3b)
+      Lines (50 %)                pixel layer = the skin with its lines filled, mask = the lines
+      Under-eye (40 %)            pixel layer = the tear trough lifted to the skin round it, mask = the zone
+      Folds (30 %)                pixel layer = the folds filled, mask = the folds
     Skin retouch (D&B + colour)   group, Pass Through
       Burn                        Curves [0,0][128,96][255,255], Luminosity, mask = burn.png
       Dodge                       Curves [0,0][128,160][255,255], Luminosity, mask = dodge.png
@@ -289,6 +295,68 @@ low-frequency evening FS is known for, so build it only when the tier or the use
 `--sigma` sets the largest mark that gets evened (~2.5 × sigma across): about 2–3 % of the face width,
 12–16 px for a face 550 px wide. Lower it if form shading starts to flatten, raise it for broad marks.
 
+## Step 3b: soften lines, folds and under-eye shadows (age kept)
+
+The classic method (Adobe's Healing Brush on an empty layer sampling Current & Below; Scott Kelby, PhLearn):
+take a line out completely on its own layer, then lower that layer's opacity so part of it comes back. The person
+keeps their age and expression, the light keeps the face's shape, and the opacity stays a slider the client can
+move. Under-eye bags get the same treatment: retouchers patch the tear-trough shadow from the cheek below, then
+fade it to 30-50 %. Lifting the shadow is what makes a bag recede; reshaping the bag itself (Liquify) is a
+different job, not this one.
+
+`scripts/soften_lines.py` does that without hand dabs. A line is a narrow valley of tone: a grey closing (max,
+then min) of a lightly smoothed copy, per channel, gives the skin level on both sides of it, so the valley's
+redness goes with its darkness (the same fraction, as in Step 3). The layer is the photo plus that smooth lift:
+pores, stubble and grain run on through it unchanged, nothing is blurred or copied, and the preview is exact.
+Only long, thin valleys count as lines (a crow's-feet network joined at its roots too); pores, blemishes and
+stubble are round or blotchy and stay. A valley deeper than `--max-depth` is a lash line, a brow, a glasses frame
+or hair and is left (magenta in `viz.png`).
+
+Do it last among the skin layers: the layer holds the finished skin plus the lift, so plan it on an export of
+everything below it (healed, D&B'd), and plan it again if those layers change.
+
+1. Export the current state and crop the face at full resolution, even width and height, with all the zones in
+   it (one crop, one group). Measure the face width at eye level, cheek to cheek, on `grid.py`: every radius
+   follows from it (lines 1/300 of it, folds 1/90, under-eye 1/45).
+2. Draw the zones on `grid.py` (step 25, scale 2) in `area_lines.json`, ~10 px of skin round each line, one key
+   per kind, each a list of polygons:
+
+       {"lines":    [crow's feet, lines under the eye, forehead, neck],
+        "folds":    [nasolabial folds, marionette lines, a deep neck crease],
+        "undereye": [the tear trough: below the lower lashes and the lid's edge, above the cheek],
+        "exclude":  [...]}
+
+   Keep every zone off the eye, lashes, brows, lips, nostrils, the hairline and glasses frames (a line seen
+   through a lens is fine, the frame's edge is not: start the zone 8-10 px clear of it). A fold zone lies on the
+   fold, not on the stubble beside it.
+3. Plan:
+
+       python3 soften_lines.py face.png X Y area_lines.json ~/.photocraft-skill/work/<photo>/lines \
+           --face-width 1500 [--opacity lines=0.5,undereye=0.4,folds=0.3]
+
+   Read `viz.png`: green = lines softened, cyan = the under-eye lift (strongest in the middle, faded in from the
+   zone's edge), magenta = deep valleys left, yellow = the zones. Green on stubble, a mole, a lash or a frame:
+   pull the zone in or exclude it. Then `compare.py face.png lines/preview.png cmp.png --rect … --scale 3 --check
+   solar,lum`: every line still there but fainter, pores continuous through it, no light line where a dark one
+   was. The output gives per kind the radius, how many lines, and `depthP50`/`depthP95` (levels below the skin
+   beside them, before opacity).
+4. `python3 import_layers.py ~/.photocraft-skill/work/<photo>/lines/layers.json` (headless `--file in --out
+   out.psd`) puts a "Soften lines" group on top; it must say `"verify": "ok"`. The opacities are the ones the
+   tier calls for (the table above); change them with `layer.setProps {"layer": id, "opacity": 0.4}`, never by
+   painting on the layers.
+5. Check the whole face at fit and at 1x against the original: "the same person, rested". `qc.py diff
+   before.png after.png <dir> --area all_zones.json --margin 12` (the zones as one `"skin"` list): nothing
+   changed outside them.
+
+Measured on a public-domain 3463 x 4329 portrait of a man in his late sixties with rimless glasses (face width
+1500 px; radii 5, 17 and 33 px): a 700 x 600 crop round one eye (crow's feet and the crease under the frame as
+lines, the tear trough inside the lens as under-eye) planned in 3.5 s, 7 lines; a 1050 x 1080 crop with the
+forehead, the other eye's crow's feet and both nasolabial folds in 9.4 s, 25 lines and 3 fold pieces, a patch of
+stubble left after the elongation test. Lines were 4-19 levels deep (P50-P95), the tear trough up to 22, the
+folds up to 27: at the default opacities 2-10 levels of lift. Both imports verified (mean difference 0.00 and
+0.01), and `qc.py diff` found nothing changed outside the zones. At `--max-depth` 28 the tear trough itself
+counted as deep and was left, hence 50 for under-eye.
+
 ## Step 4: flyaway hair
 
 Stray strands sticking out of the hair's silhouette on a plain backdrop. Unmesh Dinda's method for many
@@ -395,6 +463,13 @@ spikes. Strands across skin, eyes or clothes are healing work (Step 2), not this
 | plan_heals ids or the "next" ids point at the wrong layers | The PSD was saved and reopened: layers renumbered bottom-up | Read the ids again (`document.inspect`, `select.findLayers` by name) |
 | FS: pores still in Low, or edges soft in it | Radius too small or too large for this face | `freqsep.py radius` on plain cheek and forehead; look at its sheet |
 | A dark or light blotch where a heal went, check layers on | The heal sampled All with the solar layer showing | Heal with `currentAndBelow` below the check layers, or hide them |
+| Lines: a crease or crow's foot not softened (no green on it) | Fainter than the threshold (3x the valley noise, 2 levels at least), or wider than the radius | Its zone on its own, `--threshold 2`; a wide crease belongs in `folds` |
+| Lines: a light line where a dark one was | Opacity near 1, or the zone takes in a bright edge (rim light) | Opacity 0.4-0.6; keep the zone off lit edges |
+| Lines: stubble, pores or a mole lightened | The zone covers stubble, or a mole sits in a line | Pull the zone onto the line; exclude the mole |
+| Lines: the frame or lash line magenta, or a frame edge lightened | The zone touches it | Start the zone 8-10 px clear of frames and lashes |
+| Under-eye: no change in the tear trough (a magenta notch) | Deeper than `--max-depth` (50) | `--max-depth 60` if the zone is clear of the lashes |
+| Under-eye: the eye looks hollow or flat, "younger, someone else" | Opacity too high, or the zone reaches the lid | 0.3-0.4; the zone below the lid's edge only |
+| Folds: the cheek loses its shape | A fold is a form shadow; too much opacity or too wide a zone | 0.2-0.3, the zone on the fold only |
 | Flyaways: few strands found | Fainter than `--threshold` (4 levels, or 4x the noise beside the hair); light hair on a light backdrop | `--threshold 3`; blonde or grey on white has little contrast: say so |
 | Flyaways: helmet look | `--keep` too small for this head | `--keep` 1-2.5 % of the head's width |
 | Flyaways: a loop of hair kept | A loop around backdrop counts as hair (holes are never cleaned) | Heal or clone it by hand if it must go |

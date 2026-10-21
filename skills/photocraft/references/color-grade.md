@@ -12,9 +12,10 @@ the render. Grading (the look) comes after, on its own layers, tested for what i
 - Step 1: measure
 - Step 2: white balance
 - Step 3: black and white point, contrast
-- Step 4: the look (local contrast at its end)
+- Step 4: the look (local contrast and a masked Camera Raw finish at its end)
 - Step 5: match a shot, or a series
 - Step 6: black and white
+- Change one colour (recolour, colourways)
 - Check like a professional
 - Save, and colour management
 - Tuning and false hits
@@ -65,6 +66,7 @@ the render. Grading (the look) comes after, on its own layers, tested for what i
 ## The layer stack you're building
 
     Local contrast             Stamp Visible + High Pass (desaturated), Overlay 50 %, mask = everything but skin
+    Recolour to #RRGGBB        Hue/Saturation, one range or Colorize, mask = the object (recolor.py)
     Look                       group (optional): Color Lookup at 30-50 %, Gradient Map split tone, Color Balance,
                                Vibrance, Curves (Lab colour boost: a/b curves)
     Second light               group (mixed light only): White balance masked to that light's area
@@ -344,6 +346,28 @@ percentile chroma 8 % (desaturated: 2 %). The skin mask matters: on a studio hea
 face's local contrast and Lab stayed exactly as they were (the background +21 %); without it the face gained 29 %
 local contrast and went 2.5 L* lighter and 1.6 a* less red.
 
+### Finish the subject: Camera Raw as a masked smart filter
+
+Adobe's finishing move on a cut-out or composite: Texture, Clarity and Sharpening from the Camera Raw Filter on a
+Smart Object, its filter mask limited to the subject, so the backdrop (and a new background's softness) stays as it
+was and the result can be retuned later. In PhotoCraft the selection that is active when the filter runs becomes the
+smart filter's mask. Keep skin out of it: texture and sharpening on a face is the "crunchy" opposite of plastic.
+
+    layer.duplicate {}                    then layer.setProps {"name": "Subject finish"}
+    select.subject {}                     fix it as in SKILL.md, then take skin out, one per face and hands:
+    select.rect {"x": …, "y": …, "width": …, "height": …, "ellipse": true, "feather": 12, "mode": "subtract"}
+    filter.convertForSmartFilters {}      (the layer gets a new id)
+    filter.cameraRaw {"texture": 30, "clarity": 20, "dehaze": 10, "sharpenAmount": 40, "sharpenMasking": 50}
+    select.deselect {}
+
+`select.lasso {"points": …, "mode": "subtract"}` takes out an irregular area. Measured on a studio portrait (1200 px,
+mean change in levels, share of pixels changed by more than 2): jacket 11.4 and 89 %, face and backdrop 0.0 with the
+skin subtracted; without that the face took 4.6 and 80 %. `document.inspect` lists the filter under the layer's
+`smartFilters`; `layer.smartFilter.setParams {"layer": id, "index": 0, "params": {"texture": 15}}` retunes it, also
+after the PSD is saved and reopened (the mask survives); `layer.smartFilter.disableFilterMask {"enabled": false}`
+shows what the mask holds back (the backdrop then changed by 11.8). Texture 15-30 and Clarity 10-20 are plenty;
+check the hair edge at 3× for a halo, and run `qc.py diff` with the subject area: nothing outside it changes.
+
 ## Step 5: match a shot, or a series
 
 - **Same light:** reuse the correction. `import_layers.py …/wb/layers.json --file next.jpg --out next-corrected.psd
@@ -375,6 +399,82 @@ Convert with a Black & White adjustment layer whose weights suit the subject, th
 Weights above 100 on the dominant colour clip: a stronger red filter (120/110/-10/-50/-50/120) clipped 1-2 % of a
 portrait at each end and blew its skin. `image.adjustments.desaturate` gives flat grey; don't. A tint: `"tint": true,
 "tintColor": "#rrggbb"` on the same layer, or a Gradient Map.
+
+## Change one colour (recolour, colourways)
+
+A garment in another colour, a product's colourways from one shot, a wall, a car. Adobe's "Adjust colors" is the
+method: pick one of the photo's prominent colours, move its Hue, Saturation and Lightness on a Hue/Saturation layer,
+narrow that colour's range until skin and neighbours sharing the hue drop out (Adobe drags the far slider in to about
+10° past the object's hues, until the posterization on the cheek goes), then paint the layer mask black where colour
+still bleeds (lips, eyes, the hairline). The professional bar on top: the object's median lands on the target
+(a swatch, a brand colour) within ΔE00 2, nothing outside the object moves, and the shading and weave stay, only the
+dye changes. `scripts/recolor.py` measures and solves it; the result is one editable layer.
+
+**How PhotoCraft's Hue/Saturation works** (measured on hue ramps and real photos, 0.7.0; recolor.py models it to
+within 1 level, so `preview.png` is exact):
+- A range is `[a, b, c, d]` in HSV hue degrees: full effect from b to c, fading linearly to nothing at a and d. Any of
+  the six named keys can hold any range (`"blues": {"range": [100, 110, 130, 140]}` changes greens); the defaults are
+  the name's centre ±15° full, ±45° to nothing (reds `[315, 345, 15, 45]`, blues `[195, 225, 255, 285]`).
+- A pixel's effect is also scaled by its chroma: max − min of R, G, B over 64 levels, capped at 1. Greys never
+  move, and dull, dark pixels only partly: the deep folds of a dark garment move less than its midtones.
+- Hue rotates the HSV hue; Saturation scales HSL saturation by (1 + s/100), above 0 too, up to full; Lightness then
+  scales toward black (l < 0) or toward white (l > 0). Each times that weight.
+- Colorize keeps each pixel's HSL lightness and sets hue and saturation for everything under the mask (no range).
+- The range, Colorize and the values survive a PSD round trip (rendered from the saved PSD: mean 0.015 level off).
+
+**Steps**
+
+1. `recolor.py colors photo.jpg <dir>`: the prominent colours (hue families) with share, median hex and Lab, hue
+   spread, the range they fall in and a point on each; `colors.png` shows where each is.
+2. Draw the area with `grid.py`: `{"skin": polygon round the object, "exclude": [patches, logos, face, hands]}`.
+   The polygon can be loose where the background has another hue (the range holds it back); it must be tight where
+   neighbours share the object's colour: a patch in the same blue on a blue suit needs an exclude polygon that hugs
+   it, or a band of old colour is left round it. For a near-neutral object make a subject mask first and pass it as
+   `--mask` (headless: `photocraft-cli run photo.png --cmd select.subject --cmd edit.fill --params
+   '{"contents":"white"}' --cmd select.inverse --cmd edit.fill --params '{"contents":"black"}' --out subject.png`).
+3. `recolor.py plan photo.jpg area.json <dir> --target '#6d1f2f' [--point X,Y] [--mask subject.png]`:
+   - **range** (the object has a hue: chroma 15 and up): the range is the object's hues (2nd to 98th percentile) plus
+     a 10° falloff; when skin-like pixels in the mask are caught it narrows the skin side, Adobe's step, while 85 % of
+     the object stays at full weight (`--keep-range` to skip). `--point` picks the colour when the area holds two.
+   - **colorize** (near-neutral: grey, black, white, denim's dull blue): one hue under the mask. `--similar 12` fades
+     the mask over pixels more than 12 a*b* from the object's colour, so hands, faces and coloured patches drop out on
+     their own; other near-neutrals don't (a grey sleeve over grey jeans, a white backdrop): the area or `--mask`
+     must keep them out.
+   Then it solves Hue, Saturation and Lightness (whole numbers, what a PSD keeps) on the photo's own pixels.
+4. Read the JSON and `before_after.png` (before | after | effect: grey = how much the layer acts, red = skin-like
+   pixels it catches, cyan = object pixels whose hue the range misses). Fix the area and re-plan until `warnings` is
+   empty or explained.
+5. `import_layers.py <dir>/layers.json` (live) or `--file photo.jpg --out photo-navy.psd`: `"verify": "ok"`.
+6. `recolor.py check original.png render.png area.json --target …` on an export: `changedOutside` 0, object
+   ΔE00 ≤ 2-3, `detailCorr` ≥ 0.9, `detailContrast` 0.7-1.3 (1 = the shading scaled with the new tone), `skinPixelsChanged` near 0. Look at the edges and the
+   deepest folds at 100 %.
+
+Measured (headless, photocraft-cli 0.7.0):
+
+| Object, target | Mode, params | ΔE00 | Detail contrast | Tone scatter (L*) |
+|---|---|---|---|---|
+| Blue flight suit → burgundy #6d1f2f, patches excluded | blues `[203,213,229,239]`, hue +131, sat −17, light −20 | 0.2 (render 0.67) | 1.05 | 1.7 |
+| same → olive #556b2f | hue −136, sat −39, light −15 | 0.5 | 0.74 | 2.8 |
+| same → sky blue #87ceeb (48 L* lighter) | light +56, sat +100 | 4.0 | 0.39 | 6.2: flat, blotchy |
+| same → white #f0f0f0 | sat −100, light +91 | 0.0 | 0.40 | 8.4: blown, grey blotches in the folds |
+| Red mural beside a face → green, `--point` on it | reds `[312,322,8,18]` caught 16 782 skin-like pixels (green specks on the cheek); narrowed to `[312,322,4,6]`: 784 | 0.8 | 0.87 | 2.8 |
+| Grey fleece jacket → navy #1f2a44, subject mask | colorize 222, 38, −42; hands dropped out by `--similar` | 0.1 (render 0.35) | 1.09 | 0.7 |
+| Black shoe → brown #6b4226 | colorize 24, 94, +14 | 0.1 | 0.57 | 1.0, but specular highlights turn orange |
+
+The pattern: hue and chroma move cleanly at any distance; lightness doesn't. Past about 25 L* (navy to sky blue,
+anything to white, black to a mid colour) Lightness blows or flattens the shading and the dull shadows lag behind. Say
+so and show the result, or ask for a photo of the real colourway; for a product listing, the colour shown must be the
+colour sold.
+
+| You see | Cause | Fix |
+|---|---|---|
+| A band of the old colour round a patch or logo | The exclude polygon is bigger than the patch | Hug the patch, or leave it in the mask if its colour is outside the range |
+| Specks of the new colour on a cheek, lips or knuckles | Skin shares the object's hue (reds, oranges, magentas) | The narrowing does most; exclude polygons over faces and hands for the rest |
+| `rangeCatchesOutsideMask` high | The background has the object's hue | Expected: that is what the mask is for; keep the polygon off it |
+| Cyan in `before_after.png`, "hues outside the range" | Shadows or highlights of the object drift in hue (reflected light, a sheen) | `--spread 1`, `--falloff 20`; check skin again |
+| `toneScatter` > 4, `detailContrast` < 0.7 | A big lightness move | A smaller one, or say it can't be done well |
+| Colorize tints the sleeve, the backdrop or the sole | Other near-neutrals inside the area | Tighter polygon or `--mask`; exclude the sole |
+| Highlights turn coloured on a shiny product | Colorize gives speculars the full saturation | Exclude the speculars, or accept on matte goods only |
 
 ## Check like a professional
 

@@ -394,7 +394,7 @@ def raster(cfg, ox, oy, w, h):
         if isinstance(e[0], (list, tuple)):
             fill(m, e, 0.0)
         else:
-            x0, y0, x1, y1 = e
+            x0, y0, x1, y1 = (int(round(v)) for v in e)
             for y in range(max(0, y0 - oy), min(h, y1 - oy + 1)):
                 for x in range(max(0, x0 - ox), min(w, x1 - ox + 1)):
                     m[y * w + x] = 0.0

@@ -18,6 +18,7 @@ Commands below use `$LC` and `$LOOK` as SKILL.md sets them:
 - Step 4: presence and colour
 - Step 5: local adjustments (masks)
 - Step 6: detail
+- Underwater and hazy scenes: subject neutral, water blue
 - Check like a professional
 - Tuning and false hits
 
@@ -181,6 +182,49 @@ snaps edges to the photo.
   25 for raws with colour speckle. Lifted shadows show noise first: look there.
 - Judge both at 100 % on a crop of the subject and of the darkest area, not on the whole frame.
 
+## Underwater and hazy scenes: subject neutral, water blue
+
+Water filters out red first, so an underwater photo comes out blue-green and flat, and the deeper or
+farther something is, the stronger the cast. Adobe's underwater workflow for Lightroom goes in this order: white balance from something grey near the subject, then
+give the water its blue back (a neutral grey sea looks dead), set the end points, then separate the
+subject from the water with two masks: the subject gets contrast, Texture, Clarity and Dehaze, the water
+gets darker and calmer. Backscatter (lit particles) is cleaned last.
+
+1. **White balance on the subject's plane.** `develop.wbPick` on something grey in life at the subject's
+   distance: a grey shark, a diver's tank or fins, sand, a rock. Measure it afterwards: |a*|, |b*| ≤ 2. On a
+   blue JPEG the pick lands far up the relative scale (23834, tint +93 on a test reef shot), which is right:
+   the reef's reds and yellows come back. A blue or green fish, coral or a wetsuit is not grey.
+2. **Water back to blue.** That pick turns open water grey-violet. Put the blue back where the water is,
+   not globally: a `linear` mask from the top to just below the far reef or seabed, `temp` −60 to −90,
+   `tint` −20 to −30 (violet → cyan), `saturation` +15 to +25, `dehaze` +15 to +25, `exposure` −0.1 to
+   −0.3 (darker water calms the clutter). Then the Color Mixer for the hue: `mixer.purple.hue` −100 and
+   `mixer.blue.hue` −40 move violet toward blue and blue toward cyan, `mixer.blue.sat` +20 to +30. The
+   mixer alone can't do it: on near-grey water it moved the hue by a few degrees.
+3. **End points.** `light.exposure` a little down, `light.whites` +20 to +30, `light.blacks` −15 to −25: the
+   contrast the water took away. `effects.dehaze` +10 to +15 globally; more halos the subject.
+4. **Subject.** A `radial` (or `brush`) over each subject, `feather` 60: `contrast` +15 to +25, `texture`
+   +15 to +25, `clarity` +10 to +20, `dehaze` +10 to +20, `temp` +5 to +10; take `saturation` −5 if the
+   warmth looks painted. **Not `subject` or `background`:** on a reef shot the heuristic subject mask was
+   a centred oval over a third of the frame, and the background mask nearly the whole frame.
+5. **Backscatter.** `spot.findDust '{"sensitivity": 50}'` finds lit particles in open water (6 on the test
+   shot); check each at 100 %, since a highlight on gear or a bubble counts too, and `spot.delete` those.
+   Many large particles: PhotoCraft's dust planner on the export (`plan_spots.py`).
+
+Headless, the whole edit is one chain (positions from `$LOOK grid` on a render of the original):
+
+    $LC cli run --import dive.jpg develop.wbPick x=0.32 y=0.62 \
+      develop.set 'values={"light.exposure":-0.1,"light.whites":25,"light.blacks":-20,"effects.dehaze":15,"mixer.purple.hue":-100,"mixer.blue.hue":-40,"mixer.blue.sat":30}' \
+      mask.add kind=linear 'start=[0.5,0.0]' 'end=[0.5,0.62]' name=Water \
+      mask.adjust 'values={"temp":-70,"tint":-30,"saturation":20,"dehaze":20,"exposure":-0.15}' \
+      mask.add kind=radial 'center=[0.33,0.62]' rx=0.14 ry=0.05 feather=60 name=Shark \
+      mask.adjust 'values={"contrast":20,"texture":20,"clarity":15,"dehaze":15,"temp":8}' \
+      spot.findDust sensitivity=50 develop.get
+
+Save `develop.get`'s result as the settings file and keep rendering from it. **Check:** the grey pick
+still neutral, the water's Lab a* negative and b* clearly negative (the test went from a grey −1, −15 to a
+blue −9, −30), the reds back on the reef without orange skin on divers, no halo around the subject, the
+`99.5` percentile below clipping except bubbles and strobes.
+
 ## Check like a professional
 
 1. **Before and after,** side by side: `$LOOK sheet before.png after.png --out ba.png --cols 2`, or live
@@ -205,4 +249,6 @@ snaps edges to the photo.
 | Subject mask covers part of the subject | The heuristic found the brightest, most distinct part (an eagle's head, not its shoulders) | Add `radial` / `brush` components |
 | Skin orange or blotchy | Warm white balance or too much saturation | Correct the white balance; `mixer.orange.sat` down |
 | `wb.temp` of 4200 on a JPEG looks wrong | Relative scale on non-raw files: 6500 means as shot | Judge by measurement, not by the number |
+| Water grey or violet after the white-balance pick | The pick neutralised the whole frame, water included | The water mask's `temp` and `tint`, then `mixer.purple.hue` toward blue (step 2 of the underwater section) |
+| Subject mask is an oval in the middle of the frame | The classical Subject heuristic on a scene with no clear subject (a reef, a crowd) | `radial` or `brush` masks over the subjects |
 | Grey-blue shadows | Shadows lifted far on a dark area | Less Shadows, or a mask; colour noise reduction |

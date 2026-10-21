@@ -1,8 +1,8 @@
 {
   "name": "photocraft",
   "displayName": "PhotoCraft & LightCraft Assistant (unofficial)",
-  "version": "1.5.0",
-  "description": "Unofficial: lets Claude operate PhotoCraft, the open-source Photoshop-style photo editor, and LightCraft, the open-source Lightroom-style photo library and raw developer: the live apps on macOS, or headless in Claude app chats (web, desktop, iPhone, iPad) and on Linux. Professional retouching workflows with measured QC: skin (healing, dodge & burn, frequency separation, flyaways), eyes and teeth, colour grading, cutouts and marketplace product shots, compositing, object and wire removal, straightening, skies and photo restoration, then deliverables for web, social media and print. Raw development, culling, one look across a shoot, and exports.",
+  "version": "1.6.0",
+  "description": "Unofficial: lets Claude operate PhotoCraft, the open-source Photoshop-style photo editor, and LightCraft, the open-source Lightroom-style photo library and raw developer: the live apps on macOS, or headless in Claude app chats (web, desktop, iPhone, iPad) and on Linux. Professional retouching workflows with measured QC: skin (healing, dodge & burn, frequency separation, lines softened, flyaways), eyes and teeth, colour grading and recolouring, cutouts with hair and fur edges and marketplace product shots, compositing, object and wire removal, straightening, skies and photo restoration, then deliverables for web, social media and print. Raw development (underwater too), culling, one look across a shoot, and exports.",
   "author": {
     "name": "Ivan",
     "url": "https://github.com/mendelabramzon"

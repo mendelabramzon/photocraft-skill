@@ -85,7 +85,7 @@ builds a "Check layers" group on top with four hidden layers. Turn one on with
   compare.py view within 1 level. Measured headless; the hidden group left the render identical (mean 0.0).
 - **The saturation check is a Channel Mixer, not Hue/Saturation.** Each row is L + 2 (c - L) with PhotoCraft's
   luminance weights, so luminance stays and chroma doubles (exact). PhotoCraft's Hue/Saturation fit no formula (mean
-  error 5 levels), so it can't be predicted; and a Channel Mixer stops at 200 %, which caps the gain at 2.
+  error 5 levels) for this check (`recolor.py` models its colour ranges and Colorize, within 1 level); and a Channel Mixer stops at 200 %, which caps the gain at 2.
 - **Hidden layers never export** and don't change a flat render. Delete the group (`layer.delete` with its id)
   before handing over a PSD if the client doesn't want it.
 - **Heal below the group**, on its own layer, with `"sampleLayer": "currentAndBelow"` (the planners' steps carry

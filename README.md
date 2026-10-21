@@ -24,7 +24,8 @@ use), looks at the result, and keeps your originals untouched.
   Pores, stubble, light and the person's features stay. Everything lands on named, editable layers.
   Pick the tier (light, commercial, beauty): beauty work adds frequency separation, built in 16-bit and
   checked to give the photo back exactly, with texture healed on the texture layer only, and flyaway hair
-  cleaned off plain backdrops while the hair's natural edge stays.
+  cleaned off plain backdrops while the hair's natural edge stays. Wrinkles, folds and under-eye shadows are
+  softened on their own layers at partial opacity, so the person keeps their age.
 
 The other most-requested retouching jobs work the same way. Each has a guide with the rules
 professionals follow and planning scripts that measure what a retoucher would eyeball. The result is
@@ -37,9 +38,11 @@ built as named, masked layers and checked against the plan's predicted pixels.
   whites), black and white points for screen or print, skin checked by its Lab numbers and on the
   vectorscope, camera colour fitted from a ColorChecker in the shot, tested looks (split tone, matte
   blacks, a Margulis-style Lab boost), local contrast kept off skin, matching one shot to another, and
-  black & white. All as editable layers.
+  black & white, Texture and Clarity on the subject only through a masked Camera Raw smart filter, and one
+  colour changed (a garment, a product colourway) with its range kept off skin. All as editable layers.
 - **Cutouts and marketplace-ready product shots.** Edges checked on white, black and colour; the
-  channel route for hair, glass on any backdrop, and non-destructive edge-colour layers instead of baked
+  channel route for hair, hair and fur edges finished the way Adobe teaches (mask contracted, strands
+  revealed and painted back along their growth direction), glass on any backdrop, and non-destructive edge-colour layers instead of baked
   decontamination. The product's real shadow kept (or a contact shadow, or a glossy reflection), and
   Amazon, Google, eBay, Shopify, Etsy and Zalando presets, or a client's own spec, drive the placement and a
   pass/fail deliverable check.
@@ -68,7 +71,8 @@ built as named, masked layers and checked against the plan's predicted pixels.
 
 - **Develop raws and JPEGs.** White balance from a real neutral, exposure and the tonal end points set by
   measurement, colour mixer and grading, sky, subject and gradient masks with their coverage checked, lens
-  corrections, Upright and crops for every format. Edits stay settings; originals are never written.
+  corrections, Upright and crops for every format. Underwater photos with the subject neutral and the
+  water blue again. Edits stay settings; originals are never written.
 - **Whole shoots.** Assisted culling (focus scores, burst groups) on numbered contact sheets, picks and
   ratings, one look synced across the photos taken in the same light, exposures matched.
 - **Exports for every use.** Web, Instagram and story crops, print TIFFs, size-limited uploads,
@@ -83,6 +87,9 @@ Example requests:
 - "Retouch his skin: clean, but very natural."
 - "Beauty retouch for the cover: frequency separation, and tidy the flyaways."
 - "Whiten her teeth a little and brighten the eyes. Nobody should notice."
+- "Soften his crow's feet and the bags under his eyes, but keep him looking his age."
+- "Make this jacket navy, and give me the shoe in burgundy and olive for the shop."
+- "Cut her out onto dark grey; keep the flyaway hair looking real."
 - "Put these product photos on pure white for Amazon, with a soft shadow."
 - "Make Zalando and Shopify versions of this packshot and check they pass."
 - "Put this bottle on the kitchen counter photo so it looks like it was shot there."
@@ -96,6 +103,7 @@ Example requests:
 - "Cull the wedding folder: the sharpest of each burst, flagged as picks."
 - "Give every photo from the dinner the same warm look as this one."
 - "Instagram portrait crops of the picks, 1080 × 1350."
+- "Fix the colours of my dive photos: the reef looks all blue-green."
 
 ## Requirements
 
